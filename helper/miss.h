@@ -1,3 +1,5 @@
+// Data structures needed by dbgeng.idl
+
 typedef void* FARPROC;
 
 // from winnt.h
