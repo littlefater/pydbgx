@@ -25,9 +25,10 @@ from ctypes import windll
 from ctypes import c_ulong, c_void_p, POINTER
 from ctypes import byref, create_string_buffer, pointer, cast
 
-from comtypes import COMError
+from comtypes import COMError, CoClass
 from comtypes.hresult import S_OK, S_FALSE
 from comtypes.automation import IID, GUID
+from comtypes.client import GetModule
 
 
 try:
@@ -77,29 +78,33 @@ INFINITE = 0xFFFFFFFF
 ########################################
 
 
-class DebugEventCallbacksImpl(DbgEng.IDebugEventCallbacks):
+class DebugEventCallbacks(CoClass):
     """event callback class"""
-
+    
     _reg_clsid_ = GUID('{276EFA76-BAF4-4603-A328-A0A1D3C37BFF}')
     _reg_threading_ = 'Both'
     _reg_progid_ = 'DbgEngLib.DebugEventCallbacks.1'
     _reg_novers_progid_ = 'DbgEngLib.DebugEventCallbacks'
-    _reg_desc_ = 'A do-nothing implementation of IDebugEventCallbacks'
+    _reg_desc_ = 'An implementation of IDebugEventCallbacks'
     _reg_clsctx_ = comtypes.CLSCTX_INPROC_SERVER | comtypes.CLSCTX_LOCAL_SERVER
+    
+    _com_interfaces_ = [DbgEng.IDebugEventCallbacks]
 
+    
     def __init__(self, mask=0):
-        super(DebugEventCallbacksImpl, self).__init__()
+        super(DebugEventCallbacks, self).__init__()
         self.__mask = mask
 
+    '''
     def _IUnknown__com_AddRef(self):
         pass
     
-    def _IUnknown__com_QueryInterface(self):
-        pass
+    def _IUnknown__com_QueryInterface(self, riid, ppvObj):
+        return self
     
     def _IUnknown__com_Release(self):
         pass
-
+    
     def _IDebugEventCallbacks__com_GetInterestMask(self):
         print 'GetInterestMask called.'
         return self.__mask
@@ -125,86 +130,94 @@ class DebugEventCallbacksImpl(DbgEng.IDebugEventCallbacks):
         return DbgEnd.DEBUG_STATUS_NO_CHANGE
 
     def _IDebugEventCallbacks__com_ExitProcess(self, ExitCode):
+        print 'ExitProcess called.'
         return DbgEnd.DEBUG_STATUS_NO_CHANGE
 
     def _IDebugEventCallbacks__com_LoadModule(self, ImageFileHandle, BaseOffset, ModuleSize, ModuleName, ImageName, CheckSum, TimeDateStamp):
+        print 'LoadModule called.'
         return DbgEnd.DEBUG_STATUS_NO_CHANGE
 
     def _IDebugEventCallbacks__com_UnloadModule(self, ImageBaseName, BaseOffset):
+        print 'UnloadModule called.'
         return DbgEnd.DEBUG_STATUS_NO_CHANGE
     
     def _IDebugEventCallbacks__com_SystemError(self, Error, Level):
+        print 'SystemError called.'
         return DbgEnd.DEBUG_STATUS_NO_CHANGE
 
     def _IDebugEventCallbacks__com_SessionStatus(self, Status):
+        print 'SessionStatus called.'
         return DbgEnd.DEBUG_STATUS_NO_CHANGE
     
     def _IDebugEventCallbacks__com_ChangeDebuggeeState(self, Flags, Argument):
+        print 'ChangeDebuggeeState called.'
         return S_OK
     
     def _IDebugEventCallbacks__com_ChangeEngineState(self, Flags, Argument):
+        print 'ChangeEngineState called.'
         return S_OK
     
     def _IDebugEventCallbacks__com_ChangeSymbolState(self, Flags, Argument):
+        print 'ChangeSymbolState called.'
         return S_OK
+    '''
     
     def GetInterestMask(self):
-        '-no docstring-'
-        print 'called'
+        # print 'Mask:', self.__mask
         return self.__mask
-
+    
     def Breakpoint(self, Bp):
-        '-no docstring-'
-        #return 
+        return DbgEnd.DEBUG_STATUS_NO_CHANGE
 
     def Exception(self, Exception, FirstChance):
-        '-no docstring-'
-        #return 
+        print 'Exception'
+        return DbgEnd.DEBUG_STATUS_NO_CHANGE
 
     def CreateThread(self, Handle, DataOffset, StartOffset):
-        '-no docstring-'
-        #return
+        print 'CreateThread'
+        return DbgEnd.DEBUG_STATUS_NO_CHANGEn
 
     def ExitThread(self, ExitCode):
-        '-no docstring-'
-        #return
+        print 'ExitThread'
+        return DbgEnd.DEBUG_STATUS_NO_CHANGE
 
     def CreateProcess(self, ImageFileHandle, Handle, BaseOffset, ModuleSize, ModuleName, ImageName, CheckSum, TimeDateStamp, InitialThreadHandle, ThreadDataOffset, StartOffset):
-        '-no docstring-'
-        print 'test'
-        #return 
+        print 'CreateProcess'
+        return DbgEnd.DEBUG_STATUS_NO_CHANGE
 
     def ExitProcess(self, ExitCode):
-        '-no docstring-'
-        #return
+        print 'ExitProcess'
+        return DbgEnd.DEBUG_STATUS_NO_CHANGE
         
     def LoadModule(self, ImageFileHandle, BaseOffset, ModuleSize, ModuleName, ImageName, CheckSum, TimeDateStamp):
-        '-no docstring-'
-        #return
+        print 'LoadModule'
+        return DbgEnd.DEBUG_STATUS_NO_CHANGE
 
     def UnloadModule(self, ImageBaseName, BaseOffset):
-        '-no docstring-'
-        #return 
-
+        print 'UnloadModule'
+        return DbgEnd.DEBUG_STATUS_NO_CHANGE
+    
     def SystemError(self, Error, Level):
-        '-no docstring-'
-        #return
+        print 'SystemError'
+        return DbgEnd.DEBUG_STATUS_NO_CHANGE
 
     def SessionStatus(self, Status):
-        '-no docstring-'
-        #return
+        print 'SessionStatus'
+        return DbgEnd.DEBUG_STATUS_NO_CHANGE
 
     def ChangeDebuggeeState(self, Flags, Argument):
-        '-no docstring-'
-        #return 
+        print 'ChangeDebuggeeState'
+        return S_OK
     
     def ChangeEngineState(self, Flags, Argument):
-        '-no docstring-'
-        #return
-        
+        print 'ChangeEngineState'
+        print Flags
+        print Argument
+        return S_OK
+    
     def ChangeSymbolState(self, Flags, Argument):
-        '-no docstring-'
-        #return 
+        print 'ChangeSymbolState'
+        return S_OK
 
         
 class PyDbgX:
@@ -227,18 +240,28 @@ class PyDbgX:
         if None == self.__debug_control:
             raise Exception('Query IDebugControl fail.')
         print 'Success'
-
-        print self.__debug_client.GetEventCallbacks()
         
         sys.stdout.write('[*] Set DebugEventCallbacks: ')
-        event_callbacks = POINTER(DebugEventCallbacksImpl)()
+        mask = DbgEng.DEBUG_EVENT_CREATE_PROCESS | \
+            DbgEng.DEBUG_EVENT_BREAKPOINT | \
+            DbgEng.DEBUG_EVENT_EXCEPTION | \
+            DbgEng.DEBUG_EVENT_CREATE_THREAD | \
+            DbgEng.DEBUG_EVENT_EXIT_THREAD | \
+            DbgEng.DEBUG_EVENT_CREATE_PROCESS | \
+            DbgEng.DEBUG_EVENT_EXIT_PROCESS | \
+            DbgEng.DEBUG_EVENT_LOAD_MODULE | \
+            DbgEng.DEBUG_EVENT_UNLOAD_MODULE | \
+            DbgEng.DEBUG_EVENT_SYSTEM_ERROR | \
+            DbgEng.DEBUG_EVENT_SESSION_STATUS | \
+            DbgEng.DEBUG_EVENT_CHANGE_DEBUGGEE_STATE | \
+            DbgEng.DEBUG_EVENT_CHANGE_ENGINE_STATE | \
+            DbgEng.DEBUG_EVENT_CHANGE_SYMBOL_STATE
+        event_callbacks = DebugEventCallbacks(mask)
         hr = self.__debug_client.SetEventCallbacks(event_callbacks)
         if S_OK != hr:
             raise Exception('SetEventCallbacks() fail.')
         print 'Success'
         
-        print self.__debug_client.GetEventCallbacks()
-
     def get_indentity(self):
         """IDebugClient::GetIdentity method"""
 
@@ -334,12 +357,19 @@ class PyDbgX:
 
     def wait_for_event(self):
         """IDebugControl::WaitForEvent method"""
+
+        status = c_ulong(0)
+        #print self.__debug_control._IDebugControl__com_GetExecutionStatus.argtypes
+        #print self.__debug_control._IDebugControl__com_GetExecutionStatus.restype
+        #print self.__debug_control._IDebugControl__com_GetExecutionStatus(status)
+        #print self.__debug_control.GetExecutionStatus()
         
         print '[*] WaitForEvent'
 
         flags = 0
         timeout = INFINITE
-        hr = self.__debug_control.WaitForEvent(flags, timeout)
+        while True:
+            hr = self.__debug_control.WaitForEvent(flags, INFINITE)
         if S_OK == hr:
             print 'WaitForEvent OK'
         elif S_FALSE == hr:
@@ -393,6 +423,6 @@ if __name__ == '__main__':
 
     dbgx = PyDbgX()
     #dbgx.list_running_process()
-    dbgx.create_process('d:\\Workspace\\GitHub\\pydbgx\\notepad.exe')
+    dbgx.create_process('notepad.exe')
     dbgx.wait_for_event()
-    dbgx.get_last_event()
+    #dbgx.get_last_event()
