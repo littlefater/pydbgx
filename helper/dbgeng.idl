@@ -5,13 +5,12 @@ import "oaidl.idl";
 import "ocidl.idl";
 
 [
-    uuid(95F974F5-B0AE-44A4-8EB9-FEC4E8136416),
+    uuid(14E1F644-F1FF-4527-A8E0-2B9BCF2BFF7F),
     helpstring("DbgEng Type Library")
 ]
 
 library DbgEng {
 
-    importlib("stdole32.tlb");
     importlib("stdole2.tlb");
 
     // Data structures needed by dbgeng.idl
