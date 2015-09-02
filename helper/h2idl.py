@@ -103,12 +103,12 @@ class Function:
         if list != type(item) and len(item) < 3:
             raise 'Function parameters can not be formatted: Error number.'
         
-        if -1 != item[0].find('In'):     
+        if -1 != item[0].find('_In'):     
             if -1 != item[0].find('opt'):
                 parameter += '[in, optional]  '
             else:
                 parameter += '[in]  '        
-        elif -1 != item[0].find('Out'):         
+        elif -1 != item[0].find('_Out'):         
             if -1 != item[0].find('opt'):
                 parameter += '[out, optional]  '
             else:
