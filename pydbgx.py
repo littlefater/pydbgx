@@ -5,6 +5,7 @@ Python wrapper for Windows Debugger Engine API.
 
 import os
 import sys
+import logging
 import platform
 
 
@@ -55,23 +56,51 @@ if platform.architecture()[0] == '32bit':
         dbgeng = windll.LoadLibrary('lib/dbgeng.dll')
     except:
         print 'Can not load 32bit dbghelp.dll and dbgeng.dll.'
+        exit(0)
 elif platform.architecture()[0] == '64bit':
     try:
         dbghelp = windll.LoadLibrary('lib/dbghelp_x64.dll') 
         dbgeng = windll.LoadLibrary('lib/dbgeng_x64.dll')
     except:
          print 'Can not load 64bit dbghelp.dll and dbgeng.dll.'
+         exit(0)
 else:
     raise Exception('Unsupported system.')
 
+try:
+    DebugCreate = dbgeng.DebugCreate
+except:
+    print 'Can not locate DebugCreate() function from dbgeng.dll.'
+    exit(0)
 
-DebugCreate = dbgeng.DebugCreate
+
+logger = logging.getLogger('pydbgx')
+formatter = logging.Formatter('%(message)s')
+
+LogLevel = logging.WARNING
+if 2 == len(sys.argv):
+    if 'debug' == sys.argv[1]:
+        LogLevel = logging.DEBUG
+        fh = logging.FileHandler('debug.log')
+        fh.setLevel(LogLevel)
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+    elif 'info' == sys.argv[1]:
+        LogLevel = logging.INFO
+
+logger.setLevel(LogLevel)
+
+ch = logging.StreamHandler()
+ch.setLevel(LogLevel)
+
+ch.setFormatter(formatter)
+logger.addHandler(ch)
 
 
 ########################################
 DEBUG_ONLY_THIS_PROCESS = 0x00000002
 DEBUG_CREATE_PROCESS_NO_DEBUG_HEAP = 0x00000400
-E_FAIL = 0x80004005L
+E_FAIL = 0x80004005
 E_PENDING = 0x8000000A
 E_UNEXPECTED = 0x8000FFFF
 INFINITE = 0xFFFFFFFF
@@ -86,164 +115,149 @@ class DebugEventCallbacks(CoClass):
     _reg_progid_ = 'DbgEngLib.DebugEventCallbacks.1'
     _reg_novers_progid_ = 'DbgEngLib.DebugEventCallbacks'
     _reg_desc_ = 'An implementation of IDebugEventCallbacks'
-    _reg_clsctx_ = comtypes.CLSCTX_INPROC_SERVER | comtypes.CLSCTX_LOCAL_SERVER
+    _reg_clsctx_ = comtypes.CLSCTX_INPROC_SERVER
     
     _com_interfaces_ = [DbgEng.IDebugEventCallbacks]
-
     
     def __init__(self, mask=0):
         super(DebugEventCallbacks, self).__init__()
         self.__mask = mask
 
-    '''
-    def _IUnknown__com_AddRef(self):
-        pass
-    
-    def _IUnknown__com_QueryInterface(self, riid, ppvObj):
-        return self
-    
-    def _IUnknown__com_Release(self):
-        pass
-    
-    def _IDebugEventCallbacks__com_GetInterestMask(self):
-        print 'GetInterestMask called.'
-        return self.__mask
-    
-    def _IDebugEventCallbacks__com_Breakpoint(self, Bp):
-        print 'Breakpoint called.'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
-
-    def _IDebugEventCallbacks__com_Exception(self, Exception, FirstChance):
-        print 'Exception called.'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
-
-    def _IDebugEventCallbacks__com_CreateThread(self, Handle, DataOffset, StartOffset):
-        print 'CreateThread called.'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
-
-    def _IDebugEventCallbacks__com_ExitThread(self, ExitCode):
-        print 'ExitThread called.'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
-    
-    def _IDebugEventCallbacks__com_CreateProcess(self, ImageFileHandle, Handle, BaseOffset, ModuleSize, ModuleName, ImageName, CheckSum, TimeDateStamp, InitialThreadHandle, ThreadDataOffset, StartOffset):
-        print 'CreateProcess called.'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
-
-    def _IDebugEventCallbacks__com_ExitProcess(self, ExitCode):
-        print 'ExitProcess called.'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
-
-    def _IDebugEventCallbacks__com_LoadModule(self, ImageFileHandle, BaseOffset, ModuleSize, ModuleName, ImageName, CheckSum, TimeDateStamp):
-        print 'LoadModule called.'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
-
-    def _IDebugEventCallbacks__com_UnloadModule(self, ImageBaseName, BaseOffset):
-        print 'UnloadModule called.'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
-    
-    def _IDebugEventCallbacks__com_SystemError(self, Error, Level):
-        print 'SystemError called.'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
-
-    def _IDebugEventCallbacks__com_SessionStatus(self, Status):
-        print 'SessionStatus called.'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
-    
-    def _IDebugEventCallbacks__com_ChangeDebuggeeState(self, Flags, Argument):
-        print 'ChangeDebuggeeState called.'
-        return S_OK
-    
-    def _IDebugEventCallbacks__com_ChangeEngineState(self, Flags, Argument):
-        print 'ChangeEngineState called.'
-        return S_OK
-    
-    def _IDebugEventCallbacks__com_ChangeSymbolState(self, Flags, Argument):
-        print 'ChangeSymbolState called.'
-        return S_OK
-    '''
-    
     def GetInterestMask(self):
-        # print 'Mask:', self.__mask
+        logger.debug('[*] GetInterestMask Callback')
+        logger.debug('[D] Mask: ' + str(self.__mask))
         return self.__mask
     
     def Breakpoint(self, Bp):
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
+        logger.debug('[*] Breakpoint Callback')
+        return DbgEng.DEBUG_STATUS_NO_CHANGE
 
     def Exception(self, Exception, FirstChance):
-        print 'Exception'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
+        logger.debug('[*] Exception Callback')
+        return DbgEng.DEBUG_STATUS_BREAK
 
     def CreateThread(self, Handle, DataOffset, StartOffset):
-        print 'CreateThread'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGEn
+        logger.debug('[*] CreateThread Callback')
+        return DbgEng.DEBUG_STATUS_NO_CHANGE
 
     def ExitThread(self, ExitCode):
-        print 'ExitThread'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
+        logger.debug('[*] ExitThread Callback')
+        logger.debug('[D] ExitCode: ' + str(ExitCode))
+        return DbgEng.DEBUG_STATUS_NO_CHANGE
 
-    def CreateProcess(self, ImageFileHandle, Handle, BaseOffset, ModuleSize, ModuleName, ImageName, CheckSum, TimeDateStamp, InitialThreadHandle, ThreadDataOffset, StartOffset):
-        print 'CreateProcess'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
+    def CreateProcess(self, ImageFileHandle, Handle, BaseOffset, ModuleSize,
+                      ModuleName, ImageName, CheckSum, TimeDateStamp,
+                      InitialThreadHandle, ThreadDataOffset, StartOffset):
+        logger.debug('[*] CreateProcess Callback')
+        logger.debug('[D] ImageFileHandle: ' + str(ImageFileHandle))
+        logger.debug('[D] Handle: ' + str(Handle))
+        logger.debug('[D] BaseOffset: ' + str(hex(BaseOffset)))
+        logger.debug('[D] ModuleSize: ' + str(hex(ModuleSize)))
+        logger.debug('[D] ModuleName: ' + ModuleName)
+        logger.debug('[D] ImageName: ' + ImageName)
+        logger.debug('[D] CheckSum: ' + str(hex(CheckSum)))
+        logger.debug('[D] TimeDateStamp: ' + str(hex(TimeDateStamp)))
+        logger.debug('[D] InitialThreadHandle: ' + str(hex(InitialThreadHandle)))
+        logger.debug('[D] ThreadDataOffset: ' + str(hex(ThreadDataOffset)))
+        logger.debug('[D] StartOffset: ' + str(hex(StartOffset)))
+        return DbgEng.DEBUG_STATUS_BREAK
 
     def ExitProcess(self, ExitCode):
-        print 'ExitProcess'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
+        logger.debug('[*] ExitProcess Callback')
+        logger.debug('[D] ExitCode: ' + str(ExitCode))
+        return DbgEng.DEBUG_STATUS_BREAK
         
     def LoadModule(self, ImageFileHandle, BaseOffset, ModuleSize, ModuleName, ImageName, CheckSum, TimeDateStamp):
-        print 'LoadModule'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
+        logger.debug('[*] LoadModule Callback')
+        logger.debug('[D] ImageFileHandle: ' + str(ImageFileHandle))
+        logger.debug('[D] BaseOffset: ' + str(hex(BaseOffset)))
+        logger.debug('[D] ModuleSize: ' + str(hex(ModuleSize)))
+        logger.debug('[D] ModuleName: ' + ModuleName)
+        logger.debug('[D] ImageName: ' + ImageName)
+        logger.debug('[D] CheckSum: ' + str(hex(CheckSum)))
+        logger.debug('[D] TimeDateStamp: ' + str(hex(TimeDateStamp)))
+        return DbgEng.DEBUG_STATUS_NO_CHANGE
 
     def UnloadModule(self, ImageBaseName, BaseOffset):
-        print 'UnloadModule'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
+        logger.debug('[*] UnloadModule Callback')
+        logger.debug('[D] ImageBaseName: ' + str(ImageBaseName))
+        logger.debug('[D] BaseOffset: ' + str(hex(BaseOffset)))
+        return DbgEng.DEBUG_STATUS_NO_CHANGE
     
     def SystemError(self, Error, Level):
-        print 'SystemError'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
+        logger.debug('[*] SystemError Callbak')
+        return DbgEng.DEBUG_STATUS_BREAK
 
     def SessionStatus(self, Status):
-        print 'SessionStatus'
-        return DbgEnd.DEBUG_STATUS_NO_CHANGE
+        logger.debug('[*] SessionStatus Callbak')
+        logger.debug('[*] Status: ' + str(Status))
+        return DbgEng.DEBUG_STATUS_NO_CHANGE
 
     def ChangeDebuggeeState(self, Flags, Argument):
-        print 'ChangeDebuggeeState'
+        logger.debug('[*] ChangeDebuggeeState Callbak')
+        logger.debug('[D] Flags: ' + str(Flags))
+        logger.debug('[D] Argument: ' + str(Argument))
         return S_OK
     
     def ChangeEngineState(self, Flags, Argument):
-        print 'ChangeEngineState'
-        print Flags
-        print Argument
+        logger.debug('[*] ChangeEngineState Callback Callbak')
+        logger.debug('[D] Flags: ' + str(Flags))
+        logger.debug('[D] Argument: ' + str(Argument))
         return S_OK
     
     def ChangeSymbolState(self, Flags, Argument):
-        print 'ChangeSymbolState'
+        logger.debug('[*] ChangeSymbolState Callback Callbak')
+        logger.debug('[D] Flags: ' + str(Flags))
+        logger.debug('[D] Argument: ' + str(Argument))
         return S_OK
+    
 
+class DebugOutputCallbacks(CoClass):
+    """event callback class"""
+    
+    _reg_clsid_ = GUID('{72806FC2-B8D1-4970-9019-473A8C024659}')
+    _reg_threading_ = 'Both'
+    _reg_progid_ = 'DbgEngLib.DebugOutputCallbacks.1'
+    _reg_novers_progid_ = 'DbgEngLib.DebugOutputCallbacks'
+    _reg_desc_ = 'An implementation of IDebugOutputCallbacks'
+    _reg_clsctx_ = comtypes.CLSCTX_INPROC_SERVER | comtypes.CLSCTX_LOCAL_SERVER
+    
+    _com_interfaces_ = [DbgEng.IDebugOutputCallbacks]
+
+    def __init__(self):
+        super(DebugOutputCallbacks, self).__init__()
+
+    def Output(self, Mask, Text):
+        logger.debug('[*] Output Callback')
+        logger.debug('[I] Mask: ' + str(Mask))
+        logger.debug('[I] Text:\r\n' + Text)
+    
         
 class PyDbgX:
     """debugger class"""
 
-    def __init__(self):
+    def __init__(self, output=False):
         """initiate the debugger"""
-
-        sys.stdout.write('[*] Initiate DebugClient: ')
+        
+        logger.info('[*] Initiate DebugClient')
         self.__debug_client = POINTER(DbgEng.IDebugClient)()
         hr = DebugCreate(byref(DbgEng.IDebugClient._iid_), byref(self.__debug_client))
         if S_OK != hr:
             raise Exception('DebugCreate() fail.')
-        print 'Success'
+        else:
+            logger.info('[I] Initiate DebugClient Success')
 
-        print '    Indentity:', self.get_indentity()
+        logger.debug('[D] Indentity: ' + self.get_indentity())
     
-        sys.stdout.write('[*] Initiate DebugControl: ')
-        self.__debug_control = self.__debug_client.QueryInterface(interface = DbgEng.IDebugControl)
+        logger.info('[*] Initiate DebugControl')
+        self.__debug_control = self.__debug_client.QueryInterface(DbgEng.IDebugControl)
         if None == self.__debug_control:
-            raise Exception('Query IDebugControl fail.')
-        print 'Success'
+            raise Exception('Query interface IDebugControl fail.')
+        else:
+            logger.info('[I] Initiate DebugControl Success')
         
-        sys.stdout.write('[*] Set DebugEventCallbacks: ')
-        mask = DbgEng.DEBUG_EVENT_CREATE_PROCESS | \
-            DbgEng.DEBUG_EVENT_BREAKPOINT | \
+        logger.info('[*] Set DebugEventCallbacks')
+        mask = DbgEng.DEBUG_EVENT_BREAKPOINT | \
             DbgEng.DEBUG_EVENT_EXCEPTION | \
             DbgEng.DEBUG_EVENT_CREATE_THREAD | \
             DbgEng.DEBUG_EVENT_EXIT_THREAD | \
@@ -252,15 +266,32 @@ class PyDbgX:
             DbgEng.DEBUG_EVENT_LOAD_MODULE | \
             DbgEng.DEBUG_EVENT_UNLOAD_MODULE | \
             DbgEng.DEBUG_EVENT_SYSTEM_ERROR | \
-            DbgEng.DEBUG_EVENT_SESSION_STATUS | \
+            DbgEng.DEBUG_EVENT_SESSION_STATUS
+        '''
             DbgEng.DEBUG_EVENT_CHANGE_DEBUGGEE_STATE | \
             DbgEng.DEBUG_EVENT_CHANGE_ENGINE_STATE | \
             DbgEng.DEBUG_EVENT_CHANGE_SYMBOL_STATE
+        '''
         event_callbacks = DebugEventCallbacks(mask)
         hr = self.__debug_client.SetEventCallbacks(event_callbacks)
         if S_OK != hr:
             raise Exception('SetEventCallbacks() fail.')
-        print 'Success'
+        else:
+            logger.info('[I] Set DebugEventCallbacks Success')
+
+        logger.debug('[D] EventCallbacks: ' + str(self.__debug_client.GetEventCallbacks()))
+
+        if output:
+            logger.info('[*] Set OutputCallbacks')
+            output_callbacks = DebugOutputCallbacks()
+            hr = self.__debug_client.SetOutputCallbacks(output_callbacks)
+            if S_OK != hr:
+                raise Exception('SetOutputCallbacks() fail.')
+            else:
+                logger.info('[I] Set OutputCallbacks Success')
+
+            logger.debug('[D] OutputCallbacks: ' + str(self.__debug_client.GetOutputCallbacks()))
+        
         
     def get_indentity(self):
         """IDebugClient::GetIdentity method"""
@@ -339,7 +370,10 @@ class PyDbgX:
     def create_process(self, cmd, follow_child=False):
         """create target process"""
 
-        sys.stdout.write('[*] Create Process: ')
+        logger.info('[*] Create Process')
+        logger.info('[I] Command: ' + cmd)
+        logger.info('[I] FollowChild: ' + str(follow_child))
+        
         if follow_child:
             flags = DbgEng.DEBUG_PROCESS
         else:
@@ -347,45 +381,44 @@ class PyDbgX:
 
         flags |= DEBUG_CREATE_PROCESS_NO_DEBUG_HEAP      # Prevents the debug heap from being used in the new process.
         server = 0
-        hr = self.__debug_client._IDebugClient__com_CreateProcess(server, cmd, flags)
+        hr = self.__debug_client.CreateProcess(server, cmd, flags)
         if S_OK != hr:
             raise Exception('CreateProcess() fail.')
-        print 'Success'   
-        print '    Command:', cmd
-        print '    Follow Child:', follow_child
-        print '    Indentity:', self.get_indentity()
+        else:
+            logger.info('[I] Create Process Success')
+
+        logger.debug('[D] Indentity: ' + self.get_indentity())
 
     def wait_for_event(self):
         """IDebugControl::WaitForEvent method"""
 
-        status = c_ulong(0)
-        #print self.__debug_control._IDebugControl__com_GetExecutionStatus.argtypes
-        #print self.__debug_control._IDebugControl__com_GetExecutionStatus.restype
-        #print self.__debug_control._IDebugControl__com_GetExecutionStatus(status)
-        #print self.__debug_control.GetExecutionStatus()
+        logger.debug('[D] ExecStatus: ' + str(hex(self.__debug_control.GetExecutionStatus())))
         
-        print '[*] WaitForEvent'
-
-        flags = 0
+        logger.info('[*] WaitForEvent')
+        flags = DbgEng.DEBUG_WAIT_DEFAULT
         timeout = INFINITE
         while True:
-            hr = self.__debug_control.WaitForEvent(flags, INFINITE)
-        if S_OK == hr:
-            print 'WaitForEvent OK'
-        elif S_FALSE == hr:
-            print 'WaitForEvent FALSE'
-        elif E_FAIL == hr:
-            print 'WaitForEvent FAIL'
-        elif E_PENDING == hr:
-            print 'WaitForEvent PENDING'
-        elif E_UNEXPECTED == hr:
-            print 'WaitForEvent UNEXPECTED'
-        else:
-            print 'WaitForEvent Unknow'
+            hr = self.__debug_control.WaitForEvent(flags, 1000)
+            if S_OK == hr:
+                logger.info('[I] WaitForEvent OK')
+            elif S_FALSE == hr:
+                logger.info('[I] WaitForEvent FALSE')
+            elif E_FAIL == hr:
+                raise Exception('WaitForEvent FAIL')
+            elif E_PENDING == hr:
+                logger.info('[I] WaitForEvent PENDING')
+                break
+            elif E_UNEXPECTED == hr:
+                logger.info('[I] WaitForEvent UNEXPECTED')
+                break
+            else:
+                raise Exception('WaitForEvent UNKNOWN')
+            
 
     def get_last_event(self):
         """IDebugControl::GetLastEventInformation method"""
 
+        logger.info('[*] Get Last Event')
         event_type = c_ulong(0)
         process_id = c_ulong(0)
         thread_id = c_ulong(0)
@@ -400,7 +433,7 @@ class PyDbgX:
             byref(event_type), byref(process_id), byref(thread_id),
             extra_information, extra_information_size, byref(extra_information_used),
             description, description_size, byref(description_used))
-        print hr
+        
         if S_OK != hr:
             if S_FALSE == hr:
                 extra_information_size = extra_information_used.value + 1
@@ -417,6 +450,16 @@ class PyDbgX:
                     raise Exception('GetLastEventInformation() fail.')
             else:
                 raise Exception('GetLastEventInformation() fail.')
+
+        logger.info('[I] Type: ' + str(hex(event_type.value)))
+        logger.info('[I] ProcessID: ' + str(hex(process_id.value)))
+        logger.info('[I] ThreadID: ' + str(hex(thread_id.value)))
+        if extra_information_used.value > 0:
+            logger.info('[I] ExtraInformation: ' + extra_information.value)
+        if description_used.value > 1:
+            logger.info('[I] Description: ' + description.value)
+        
+        return event_type.value, process_id.value, thread_id.value
         
 
 if __name__ == '__main__':
@@ -425,4 +468,4 @@ if __name__ == '__main__':
     #dbgx.list_running_process()
     dbgx.create_process('notepad.exe')
     dbgx.wait_for_event()
-    #dbgx.get_last_event()
+    dbgx.get_last_event()
