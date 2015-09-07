@@ -98,6 +98,7 @@ logger.addHandler(ch)
 
 
 ########################################
+DEBUG_PROCESS = 0x00000001
 DEBUG_ONLY_THIS_PROCESS = 0x00000002
 DEBUG_CREATE_PROCESS_NO_DEBUG_HEAP = 0x00000400
 E_FAIL = 0x80004005
@@ -130,7 +131,7 @@ class DebugEventCallbacks(CoClass):
     
     def Breakpoint(self, Bp):
         logger.debug('[*] Breakpoint Callback')
-        return DbgEng.DEBUG_STATUS_NO_CHANGE
+        return DbgEng.DEBUG_STATUS_BREAK
 
     def Exception(self, Exception, FirstChance):
         logger.debug('[*] Exception Callback')
@@ -236,7 +237,7 @@ class DebugOutputCallbacks(CoClass):
 class PyDbgX:
     """debugger class"""
 
-    def __init__(self, output=False):
+    def __init__(self, event=None, output=False):
         """initiate the debugger"""
         
         logger.info('[*] Initiate DebugClient')
@@ -251,28 +252,40 @@ class PyDbgX:
     
         logger.info('[*] Initiate DebugControl')
         self.__debug_control = self.__debug_client.QueryInterface(DbgEng.IDebugControl)
-        if None == self.__debug_control:
+        if self.__debug_control is None:
             raise Exception('Query interface IDebugControl fail.')
         else:
             logger.info('[I] Initiate DebugControl Success')
         
+        logger.info('[*] Initiate DebugSystemObjects')
+        self.__debug_system = self.__debug_client.QueryInterface(DbgEng.IDebugSystemObjects)
+        if self.__debug_system is None:
+            raise Exception('Query interface IDebugSystemObjects fail.')
+        else:
+            logger.info('[I] Initiate DebugSystemObjects Success')
+
         logger.info('[*] Set DebugEventCallbacks')
-        mask = DbgEng.DEBUG_EVENT_BREAKPOINT | \
-            DbgEng.DEBUG_EVENT_EXCEPTION | \
-            DbgEng.DEBUG_EVENT_CREATE_THREAD | \
-            DbgEng.DEBUG_EVENT_EXIT_THREAD | \
-            DbgEng.DEBUG_EVENT_CREATE_PROCESS | \
-            DbgEng.DEBUG_EVENT_EXIT_PROCESS | \
-            DbgEng.DEBUG_EVENT_LOAD_MODULE | \
-            DbgEng.DEBUG_EVENT_UNLOAD_MODULE | \
-            DbgEng.DEBUG_EVENT_SYSTEM_ERROR | \
-            DbgEng.DEBUG_EVENT_SESSION_STATUS
-        '''
-            DbgEng.DEBUG_EVENT_CHANGE_DEBUGGEE_STATE | \
-            DbgEng.DEBUG_EVENT_CHANGE_ENGINE_STATE | \
-            DbgEng.DEBUG_EVENT_CHANGE_SYMBOL_STATE
-        '''
-        event_callbacks = DebugEventCallbacks(mask)
+        if event is None:
+            mask = DbgEng.DEBUG_EVENT_CREATE_PROCESS | DbgEng.DEBUG_EVENT_BREAKPOINT
+            '''
+                DbgEng.DEBUG_EVENT_BREAKPOINT | \
+                DbgEng.DEBUG_EVENT_EXCEPTION | \
+                DbgEng.DEBUG_EVENT_CREATE_THREAD | \
+                DbgEng.DEBUG_EVENT_EXIT_THREAD | \
+                DbgEng.DEBUG_EVENT_CREATE_PROCESS | \
+                DbgEng.DEBUG_EVENT_EXIT_PROCESS | \
+                DbgEng.DEBUG_EVENT_LOAD_MODULE | \
+                DbgEng.DEBUG_EVENT_UNLOAD_MODULE | \     
+                DbgEng.DEBUG_EVENT_SYSTEM_ERROR | \
+                DbgEng.DEBUG_EVENT_SESSION_STATUS | \
+                DbgEng.DEBUG_EVENT_CHANGE_DEBUGGEE_STATE | \
+                DbgEng.DEBUG_EVENT_CHANGE_ENGINE_STATE | \
+                DbgEng.DEBUG_EVENT_CHANGE_SYMBOL_STATE
+            '''
+            event_callbacks = DebugEventCallbacks(mask)
+        else:
+            event_callbacks = event
+        
         hr = self.__debug_client.SetEventCallbacks(event_callbacks)
         if S_OK != hr:
             raise Exception('SetEventCallbacks() fail.')
@@ -291,6 +304,8 @@ class PyDbgX:
                 logger.info('[I] Set OutputCallbacks Success')
 
             logger.debug('[D] OutputCallbacks: ' + str(self.__debug_client.GetOutputCallbacks()))
+
+        self.__software_breakpoints = list()
         
         
     def get_indentity(self):
@@ -375,7 +390,7 @@ class PyDbgX:
         logger.info('[I] FollowChild: ' + str(follow_child))
         
         if follow_child:
-            flags = DbgEng.DEBUG_PROCESS
+            flags = DEBUG_PROCESS
         else:
             flags = DEBUG_ONLY_THIS_PROCESS
 
@@ -389,6 +404,67 @@ class PyDbgX:
 
         logger.debug('[D] Indentity: ' + self.get_indentity())
 
+    def active_process(self):
+        flags = DbgEng.DEBUG_WAIT_DEFAULT
+        timeout = 0
+        hr = self.__debug_control.WaitForEvent(flags, timeout)
+        if S_OK == hr:
+            logger.debug('[D] WaitForEvent OK')
+        elif S_FALSE == hr:
+            logger.debug('[D] WaitForEvent FALSE')
+        elif E_FAIL == hr:
+            raise Exception('WaitForEvent FAIL')
+        elif E_PENDING == hr:
+            logger.debug('[D] WaitForEvent PENDING')
+        elif E_UNEXPECTED == hr:
+            raise Exception('WaitForEvent UNEXPECTED')
+        else:
+            raise Exception('WaitForEvent UNKNOWN')
+        
+        hr = self.__debug_control.Execute(DbgEng.DEBUG_OUTCTL_THIS_CLIENT, '|0s', DbgEng.DEBUG_EXECUTE_ECHO)
+        if S_OK != hr:
+            raise Exception('Execute() fail.')
+
+    def set_software_breakpoint_addr(self, address):
+        '''set software breakpoint'''
+
+        logger.debug('[D] Add breakpoint on address: ' + str(hex(address)))
+        software_breakpoint = self.__debug_control.AddBreakpoint(DbgEng.DEBUG_BREAKPOINT_CODE, DbgEng.DEBUG_ANY_ID)
+        if software_breakpoint is None:
+            raise Exception('AddBreakpoint() fail.')
+
+        hr = software_breakpoint.SetOffset(address)
+        if S_OK != hr:
+            raise Exception('SetOffset() fail.')
+
+        hr = software_breakpoint.AddFlags(DbgEng.DEBUG_BREAKPOINT_ENABLED)
+        if S_OK != hr:
+            raise Exception('AddFlags() fail.')
+
+        logger.debug('[D] Breakpoint: ' + str(software_breakpoint))
+
+        self.__software_breakpoints.append(software_breakpoint)
+    
+    def set_software_breakpoint_exp(self, expression):
+        '''set software breakpoint expression'''
+
+        logger.debug('[D] Add breakpoint expression: ' + expression)
+        software_breakpoint = self.__debug_control.AddBreakpoint(DbgEng.DEBUG_BREAKPOINT_CODE, DbgEng.DEBUG_ANY_ID)
+        if software_breakpoint is None:
+            raise Exception('AddBreakpoint() fail.')
+
+        hr = software_breakpoint.SetOffsetExpression(expression)
+        if S_OK != hr:
+            raise Exception('SetOffsetExpression() fail.')
+
+        hr = software_breakpoint.AddFlags(DbgEng.DEBUG_BREAKPOINT_ENABLED)
+        if S_OK != hr:
+            raise Exception('AddFlags() fail.')
+
+        logger.debug('[D] Breakpoint: ' + str(software_breakpoint))
+
+        self.__software_breakpoints.append(software_breakpoint)
+
     def wait_for_event(self):
         """IDebugControl::WaitForEvent method"""
 
@@ -398,27 +474,118 @@ class PyDbgX:
         flags = DbgEng.DEBUG_WAIT_DEFAULT
         timeout = INFINITE
         while True:
-            hr = self.__debug_control.WaitForEvent(flags, 1000)
+            try:
+                hr = self.__debug_control.WaitForEvent(flags, INFINITE)
+            except COMError:
+                print 'Unknown error.'
+                exit(0)
             if S_OK == hr:
-                logger.info('[I] WaitForEvent OK')
+                logger.debug('[D] WaitForEvent OK')
             elif S_FALSE == hr:
-                logger.info('[I] WaitForEvent FALSE')
+                logger.debug('[D] WaitForEvent FALSE')
             elif E_FAIL == hr:
                 raise Exception('WaitForEvent FAIL')
             elif E_PENDING == hr:
-                logger.info('[I] WaitForEvent PENDING')
+                logger.debug('[D] WaitForEvent PENDING')
                 break
             elif E_UNEXPECTED == hr:
-                logger.info('[I] WaitForEvent UNEXPECTED')
+                logger.debug('[D] WaitForEvent UNEXPECTED')
                 break
             else:
                 raise Exception('WaitForEvent UNKNOWN')
-            
+            self.__debug_control.Execute(DbgEng.DEBUG_OUTCTL_THIS_CLIENT, '.lastevent', DbgEng.DEBUG_EXECUTE_ECHO)
+            self.get_last_event()
+            logger.debug('[D] ExitCode: ' + str(self.__debug_client.GetExitCode()))
 
+    def list_event_filtes(self):
+        '''list event filtes'''
+
+        specific_events, specific_exceptions, arbitrary_exceptions = self.__debug_control.GetNumberEventFilters()
+        total = specific_events + specific_exceptions
+        
+        if total == 0:
+            print 'No filters.'
+            return
+
+        for index in range(0, total):
+
+            print 'Filter #' + str(index) + ':'
+
+            buffer_size = 0x100
+            buffer = create_string_buffer(buffer_size)
+            text_size = c_ulong(0)
+            hr = self.__debug_control._IDebugControl__com_GetEventFilterText(index,
+                buffer,
+                buffer_size,
+                byref(text_size))
+            if S_OK != hr:
+                if S_FALSE == hr:
+                    buffer_size = text_size.value + 1
+                    buffer = create_string_buffer(buffer_size)
+                    hr = self.__debug_control._IDebugControl__com_GetEventFilterText(index,
+                        buffer,
+                        buffer_size,
+                        byref(text_size))
+                    if S_OK != hr:
+                        raise Exception('GetEventFilterText() fail.')
+                else:
+                    raise Exception('GetEventFilterText() fail.')
+            if text_size.value > 1:
+                print buffer.value
+            
+            buffer_size = 0x100
+            buffer = create_string_buffer(buffer_size)
+            command_size = c_ulong(0)
+            hr = self.__debug_control._IDebugControl__com_GetEventFilterCommand(index,
+                buffer,
+                buffer_size,
+                byref(command_size))
+            if S_OK != hr:
+                if S_FALSE == hr:
+                    buffer_size = command_size.value + 1
+                    buffer = create_string_buffer(buffer_size)
+                    hr = self.__debug_control._IDebugControl__com_GetEventFilterCommand(index,
+                        buffer,
+                        buffer_size,
+                        byref(command_size))
+                    if S_OK != hr:
+                        raise Exception('GetEventFilterCommand() fail.')
+                else:
+                    raise Exception('GetEventFilterCommand() fail.')
+            if command_size.value > 1:
+                print buffer.value
+
+            try:
+                buffer_size = 0x100
+                buffer = create_string_buffer(buffer_size)
+                argument_size = c_ulong(0)
+                hr = self.__debug_control._IDebugControl__com_GetSpecificFilterArgument(index,
+                    buffer,
+                    buffer_size,
+                    byref(argument_size))
+                if S_OK != hr:
+                    if S_FALSE == hr:
+                        buffer_size = argument_size.value + 1
+                        buffer = create_string_buffer(buffer_size)
+                        hr = self.__debug_control._IDebugControl__com_GetSpecificFilterArgument(index,
+                            buffer,
+                            buffer_size,
+                            byref(argument_size))
+                        if S_OK != hr:
+                            raise Exception('GetEventFilterArgument() fail.')
+                    else:
+                        raise Exception('GetEventFilterArgument() fail.')
+                if argument_size.value > 1:
+                    print buffer.value
+            except COMError:
+                pass
+
+            print '-' * 30
+    
     def get_last_event(self):
         """IDebugControl::GetLastEventInformation method"""
 
-        logger.info('[*] Get Last Event')
+        logger.debug('[*] Get Last Event')
         event_type = c_ulong(0)
         process_id = c_ulong(0)
         thread_id = c_ulong(0)
@@ -451,13 +618,13 @@ class PyDbgX:
             else:
                 raise Exception('GetLastEventInformation() fail.')
 
-        logger.info('[I] Type: ' + str(hex(event_type.value)))
-        logger.info('[I] ProcessID: ' + str(hex(process_id.value)))
-        logger.info('[I] ThreadID: ' + str(hex(thread_id.value)))
+        logger.debug('[D] Type: ' + str(hex(event_type.value)))
+        logger.debug('[D] ProcessID: ' + str(hex(process_id.value)))
+        logger.debug('[D] ThreadID: ' + str(hex(thread_id.value)))
         if extra_information_used.value > 0:
-            logger.info('[I] ExtraInformation: ' + extra_information.value)
+            logger.debug('[D] ExtraInformation: ' + extra_information.value)
         if description_used.value > 1:
-            logger.info('[I] Description: ' + description.value)
+            logger.debug('[D] Description: ' + description.value)
         
         return event_type.value, process_id.value, thread_id.value
         
@@ -466,6 +633,9 @@ if __name__ == '__main__':
 
     dbgx = PyDbgX()
     #dbgx.list_running_process()
-    dbgx.create_process('notepad.exe')
+    dbgx.create_process('notepad.exe', True)
+    dbgx.active_process()
+    #dbgx.set_software_breakpoint_addr(0x01003689)
+    dbgx.set_software_breakpoint_exp('kernel32!CreateFileW')
     dbgx.wait_for_event()
     dbgx.get_last_event()
