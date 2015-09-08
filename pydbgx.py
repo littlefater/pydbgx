@@ -5,6 +5,7 @@ Python wrapper for Windows Debugger Engine API.
 
 import os
 import sys
+import struct
 import logging
 import platform
 
@@ -75,26 +76,8 @@ except:
 
 
 logger = logging.getLogger('pydbgx')
-formatter = logging.Formatter('%(message)s')
-
 LogLevel = logging.WARNING
-if 2 == len(sys.argv):
-    if 'debug' == sys.argv[1]:
-        LogLevel = logging.DEBUG
-        fh = logging.FileHandler('debug.log')
-        fh.setLevel(LogLevel)
-        fh.setFormatter(formatter)
-        logger.addHandler(fh)
-    elif 'info' == sys.argv[1]:
-        LogLevel = logging.INFO
-
 logger.setLevel(LogLevel)
-
-ch = logging.StreamHandler()
-ch.setLevel(LogLevel)
-
-ch.setFormatter(formatter)
-logger.addHandler(ch)
 
 
 ########################################
@@ -110,13 +93,6 @@ INFINITE = 0xFFFFFFFF
 
 class DebugEventCallbacks(CoClass):
     """event callback class"""
-    
-    _reg_clsid_ = GUID('{276EFA76-BAF4-4603-A328-A0A1D3C37BFF}')
-    _reg_threading_ = 'Both'
-    _reg_progid_ = 'DbgEngLib.DebugEventCallbacks.1'
-    _reg_novers_progid_ = 'DbgEngLib.DebugEventCallbacks'
-    _reg_desc_ = 'An implementation of IDebugEventCallbacks'
-    _reg_clsctx_ = comtypes.CLSCTX_INPROC_SERVER
     
     _com_interfaces_ = [DbgEng.IDebugEventCallbacks]
     
@@ -216,13 +192,6 @@ class DebugEventCallbacks(CoClass):
 class DebugOutputCallbacks(CoClass):
     """event callback class"""
     
-    _reg_clsid_ = GUID('{72806FC2-B8D1-4970-9019-473A8C024659}')
-    _reg_threading_ = 'Both'
-    _reg_progid_ = 'DbgEngLib.DebugOutputCallbacks.1'
-    _reg_novers_progid_ = 'DbgEngLib.DebugOutputCallbacks'
-    _reg_desc_ = 'An implementation of IDebugOutputCallbacks'
-    _reg_clsctx_ = comtypes.CLSCTX_INPROC_SERVER | comtypes.CLSCTX_LOCAL_SERVER
-    
     _com_interfaces_ = [DbgEng.IDebugOutputCallbacks]
 
     def __init__(self):
@@ -232,12 +201,195 @@ class DebugOutputCallbacks(CoClass):
         logger.debug('[*] Output Callback')
         logger.debug('[I] Mask: ' + str(Mask))
         logger.debug('[I] Text:\r\n' + Text)
+
+
+class Registers:
+    """registers class"""
+
+    def __init__(self, debug_client):
+        """initiate registers class"""
+        
+        self.__debug_client = debug_client
+        self.__registers = debug_client.QueryInterface(DbgEng.IDebugRegisters)
+        self.__number_registers = self.__registers.GetNumberRegisters()
+        self.__regs = dict()
+        self.__regs_index = dict()
+        self.__update_regs()    
+
+    def read(self, name):
+        """read register value"""
+        
+        if self.__regs.has_key(name):
+            return self.__regs[name]
+        else:
+            raise Execption('Invalid register name.')
+
+    def set(self, name, value):
+        """set register value"""
+        
+        if self.__regs.has_key(name):
+            index = self.__regs_index[name]
+            self.__set_reg_value_by_index(index, value)
+            self.__update_regs()
+        else:
+            raise Execption('Invalid register name.')
+
+    def get_frame(self):
+        """IDebugRegisters::GetFrameOffset method"""
+
+        return self.__registers.GetFrameOffset()
+
+    def get_stack(self):
+        """IDebugRegisters::GetStackOffset method"""
+
+        return self.__registers.GetStackOffset()
+            
+    def __update_regs(self):
+        """read all register values"""
+        
+        for i in range(0, self.__number_registers):
+            reg_name = self.__get_reg_name_by_index(i)
+            reg_value = self.__get_reg_value_by_index(i)
+            self.__regs[reg_name] = reg_value
+            self.__regs_index[reg_name] = i
+
+    def __get_reg_name_by_index(self, index):
+        """retrieve register name by index"""
+        
+        name_buffer_size = 0x100
+        name_buffer = create_string_buffer(name_buffer_size)
+        name_size = c_ulong(0)
+        desc = POINTER(DbgEng._DEBUG_REGISTER_DESCRIPTION)()
+        hr = self.__registers._IDebugRegisters__com_GetDescription(
+            index, name_buffer, name_buffer_size, byref(name_size), desc)
+        if S_OK != hr:
+            if S_FALSE == hr:
+                name_buffer_size = name_size.value + 1
+                name_buffer = create_string_buffer(name_buffer_size)
+                
+                hr = self.__registers._IDebugRegisters__com_GetDescription(
+                    index, name_buffer, name_buffer_size, byref(name_size), desc)
+
+                if S_OK != hr:
+                    raise Exception('GetDescription() fail.')
+            else:
+                raise Exception('GetDescription() fail.')
+
+        if name_size.value > 0:
+            return name_buffer.value
+        return None
+
+    def __get_reg_value_by_index(self, index):
+        """retrieve register value by index"""
+        
+        debug_value = self.__registers.GetValue(index)
+        union = debug_value.__getattribute__(debug_value._fields_[0][0])
+        
+        if debug_value.Type == DbgEng.DEBUG_VALUE_INT8:
+            value = union.I8
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_INT16:
+            value = union.I16
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_INT32:
+            value = union.I32
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_INT64:
+            value = union.__getattribute__(union._fields_[3][0]).I64
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_FLOAT32:
+            value = union.F32
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_FLOAT64:
+            value = union.F64
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_FLOAT80:
+            value = union.F80Bytes
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_FLOAT128:
+            value = union.F128Bytes
+        else:
+            value = 0
+        
+        return value
+
+    def __set_reg_value_by_index(self, index, value):
+        """set register value by index"""
+        
+        debug_value = self.__registers.GetValue(index)
+        union = debug_value.__getattribute__(debug_value._fields_[0][0])
+        
+        if debug_value.Type == DbgEng.DEBUG_VALUE_INT8:
+            union.I8 = value
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_INT16:
+            union.I16 = value
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_INT32:
+            union.I32 = value
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_INT64:
+            union.__getattribute__(union._fields_[3][0]).I64 = value
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_FLOAT32:
+            union.F32 = value
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_FLOAT64:
+            union.F64 = value
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_FLOAT80:
+            union.F80Bytes = value
+        elif debug_value.Type == DbgEng.DEBUG_VALUE_FLOAT128:
+            union.F128Bytes = value
+        else:
+            raise Exception('DEBUG_VALUE type not supportted.')
+        
+        print self.__registers.SetValue(index, debug_value)
+
+        
+class DataSpace:
+    """data space class"""
+
+    def __init__(self, debug_client):
+        """initiate data space class"""
+
+        self.__debug_client = debug_client
+        self.__data_space = debug_client.QueryInterface(DbgEng.IDebugDataSpaces)
+        
+    def read_memory(self, offset, length):
+        """read virtual address"""
+        
+        buffer = create_string_buffer(length+1)
+        bytes_read = c_ulong(0)
+        
+        hr = self.__data_space._IDebugDataSpaces__com_ReadVirtual(offset, buffer, length, byref(bytes_read))
+        if S_OK != hr:
+            logger.warning('ReadVirtual() fail.')
+            return None
+        
+        return buffer.raw[0:bytes_read.value]
+
+    def read_wide_string(self, offset):
+        """read wide string"""
+
+        out_str = ''
+
+        while True:
+            data = self.read_memory(offset, 4)
+            if data == None:
+                break
+            if data[1] != '\x00' or data[3] != '\x00':
+                break
+            if data[:2] == '\x00\x00':
+                out_str += data[:2]
+                break
+            out_str += data
+            if data[2:] == '\x00\x00':
+                break
+            offset += 4
+            
+        return out_str
+        
+    def write_memory(self, offset, buffer):
+        """write virtual address"""
+        pass
+
+    def search(self):
+        """search virtual address"""
+        pass
     
         
 class PyDbgX:
     """debugger class"""
 
-    def __init__(self, event=None, output=False):
+    def __init__(self, event_cb=None, output=False):
         """initiate the debugger"""
         
         logger.info('[*] Initiate DebugClient')
@@ -265,7 +417,7 @@ class PyDbgX:
             logger.info('[I] Initiate DebugSystemObjects Success')
 
         logger.info('[*] Set DebugEventCallbacks')
-        if event is None:
+        if event_cb is None:
             mask = DbgEng.DEBUG_EVENT_CREATE_PROCESS | DbgEng.DEBUG_EVENT_BREAKPOINT
             '''
                 DbgEng.DEBUG_EVENT_BREAKPOINT | \
@@ -284,7 +436,7 @@ class PyDbgX:
             '''
             event_callbacks = DebugEventCallbacks(mask)
         else:
-            event_callbacks = event
+            event_callbacks = event_cb
         
         hr = self.__debug_client.SetEventCallbacks(event_callbacks)
         if S_OK != hr:
@@ -426,7 +578,7 @@ class PyDbgX:
             raise Exception('Execute() fail.')
 
     def set_software_breakpoint_addr(self, address):
-        '''set software breakpoint'''
+        """set software breakpoint"""
 
         logger.debug('[D] Add breakpoint on address: ' + str(hex(address)))
         software_breakpoint = self.__debug_control.AddBreakpoint(DbgEng.DEBUG_BREAKPOINT_CODE, DbgEng.DEBUG_ANY_ID)
@@ -446,7 +598,7 @@ class PyDbgX:
         self.__software_breakpoints.append(software_breakpoint)
     
     def set_software_breakpoint_exp(self, expression):
-        '''set software breakpoint expression'''
+        """set software breakpoint expression"""
 
         logger.debug('[D] Add breakpoint expression: ' + expression)
         software_breakpoint = self.__debug_control.AddBreakpoint(DbgEng.DEBUG_BREAKPOINT_CODE, DbgEng.DEBUG_ANY_ID)
@@ -498,7 +650,7 @@ class PyDbgX:
             logger.debug('[D] ExitCode: ' + str(self.__debug_client.GetExitCode()))
 
     def list_event_filtes(self):
-        '''list event filtes'''
+        """list event filtes"""
 
         specific_events, specific_exceptions, arbitrary_exceptions = self.__debug_control.GetNumberEventFilters()
         total = specific_events + specific_exceptions
@@ -629,13 +781,85 @@ class PyDbgX:
         return event_type.value, process_id.value, thread_id.value
         
 
+class MyclassDebugEventCallbacks(DebugEventCallbacks):
+
+    def __init__(self, mask=0):
+        super(DebugEventCallbacks, self).__init__()
+        self.__mask = mask
+
+    def GetInterestMask(self):
+        logger.debug('[*] My GetInterestMask Callback')
+        logger.debug('[D] Mask: ' + str(self.__mask))
+        return self.__mask
+    
+    def Breakpoint(self, Bp):
+        logger.debug('[*] My Breakpoint Callback')
+        try:
+            self.__handle_breakpoint(Bp)
+        except Exception as e:
+            print e
+        return DbgEng.DEBUG_STATUS_BREAK
+    
+    def __handle_breakpoint(self, Bp):
+        Param = Bp.GetParameters()
+        if Param.BreakType == DbgEng.DEBUG_BREAKPOINT_CODE:
+            
+            print 'Breakpoint Hit Address:', hex(Param.Offset)
+            
+            buffer_size = Param.OffsetExpressionSize + 1
+            buffer = create_string_buffer(buffer_size)
+            expression_size = c_ulong(0)
+            
+            hr = Bp._IDebugBreakpoint__com_GetOffsetExpression(buffer, buffer_size, byref(expression_size))
+            if S_OK != hr:
+                raise Exception('GetOffsetExpression() fail.')
+            
+            if expression_size.value > 1:
+                expression = buffer.value
+                print 'Breakpoint Expression:', expression
+
+                if -1 != expression.find('CreateFileW'):
+                    debug_client = Bp.GetAdder()
+                    r = Registers(debug_client)
+                    esp = r.get_stack()
+                    m = DataSpace(debug_client)
+                    data = m.read_memory(esp+4, 4)
+                    addr = struct.unpack('<I', data)[0]
+                    data = m.read_wide_string(addr)
+                    print 'File Created:', data.decode('utf16')
+
+
 if __name__ == '__main__':
 
-    dbgx = PyDbgX()
+    logger = logging.getLogger('pydbgx')
+    formatter = logging.Formatter('%(message)s')
+
+    LogLevel = logging.WARNING
+    if 2 == len(sys.argv):
+        if 'debug' == sys.argv[1]:
+            LogLevel = logging.DEBUG
+            fh = logging.FileHandler('debug.log')
+            fh.setLevel(LogLevel)
+            fh.setFormatter(formatter)
+            logger.addHandler(fh)
+        elif 'info' == sys.argv[1]:
+            LogLevel = logging.INFO
+
+    logger.setLevel(LogLevel)
+
+    ch = logging.StreamHandler()
+    ch.setLevel(LogLevel)
+
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+
+    mask = DbgEng.DEBUG_EVENT_BREAKPOINT
+    event_callback = MyclassDebugEventCallbacks(mask)
+    dbgx = PyDbgX(event_cb=event_callback)
+    #dbgx = PyDbgX(output=True)
     #dbgx.list_running_process()
     dbgx.create_process('notepad.exe', True)
     dbgx.active_process()
     #dbgx.set_software_breakpoint_addr(0x01003689)
     dbgx.set_software_breakpoint_exp('kernel32!CreateFileW')
     dbgx.wait_for_event()
-    dbgx.get_last_event()
