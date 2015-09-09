@@ -33,35 +33,48 @@ from comtypes.automation import IID, GUID
 from comtypes.client import GetModule
 
 
+CurrentDir = os.path.dirname(os.path.abspath(__file__))
+DbgEngTlb = os.path.join(CurrentDir, 'helper', 'DbgEng.tlb')
+LibFolder = os.path.join(CurrentDir, 'lib')
+DbgHelpDLL = os.path.join(LibFolder, 'dbghelp.dll')
+DbgEngDLL = os.path.join(LibFolder, 'dbgeng.dll')
+DbgHelpDLL64 = os.path.join(LibFolder, 'dbghelp_x64.dll')
+DbgEngDLL64 = os.path.join(LibFolder, 'dbgeng_x64.dll')
+
+
 try:
     from comtypes.gen import DbgEng
 except ImportError:
-    if os.path.isfile('helper/DbgEng.tlb'):
+    if os.path.isfile(DbgEngTlb):
         from comtypes.client import GetModule
-        GetModule('helper/DbgEng.tlb')
+        GetModule(DbgEngTlb)
         from comtypes.gen import DbgEng
     else:
         print 'Please use the tools in the helper folder to generate the DbgEng.tlb file.'
         exit(0)
 
 
-if False == os.path.isdir('lib'):
-    os.mkdir('lib')
-    print 'Missing dbghelp.dll and dbgeng.dll, please copy them to the lib/ folder.'
-    exit(0)
-
-
 if platform.architecture()[0] == '32bit':
+    if False == os.path.isfile(DbgHelpDLL) or False == os.path.isfile(DbgEngDLL):
+        if False == os.path.isdir(LibFolder):
+            os.mkdir(LibFolder)
+        print 'Missing dbghelp.dll and dbgeng.dll, please copy them to the "' + LibFolder + '" folder.'
+        exit(0)
     try:
-        dbghelp = windll.LoadLibrary('lib/dbghelp.dll') 
-        dbgeng = windll.LoadLibrary('lib/dbgeng.dll')
+        dbghelp = windll.LoadLibrary(DbgHelpDLL) 
+        dbgeng = windll.LoadLibrary(DbgEngDLL)
     except:
         print 'Can not load 32bit dbghelp.dll and dbgeng.dll.'
         exit(0)
 elif platform.architecture()[0] == '64bit':
+    if False == os.path.isfile(DbgHelpDLL64) or False == os.path.isfile(DbgEngDLL64):
+        if False == os.path.isdir(LibFolder):
+            os.mkdir(LibFolder)
+        print 'Missing dbghelp_x64.dll and dbgeng_x64.dll, please copy them to the "' + LibFolder + '" folder and rename them appropriately.'
+        exit(0)
     try:
-        dbghelp = windll.LoadLibrary('lib/dbghelp_x64.dll') 
-        dbgeng = windll.LoadLibrary('lib/dbgeng_x64.dll')
+        dbghelp = windll.LoadLibrary(DbgHelpDLL64) 
+        dbgeng = windll.LoadLibrary(DbgEngDLL64)
     except:
          print 'Can not load 64bit dbghelp.dll and dbgeng.dll.'
          exit(0)
@@ -97,6 +110,8 @@ class DebugEventCallbacks(CoClass):
     _com_interfaces_ = [DbgEng.IDebugEventCallbacks]
     
     def __init__(self, mask=0):
+        """initialize event callbacks"""
+        
         super(DebugEventCallbacks, self).__init__()
         self.__mask = mask
 
@@ -190,7 +205,7 @@ class DebugEventCallbacks(CoClass):
     
 
 class DebugOutputCallbacks(CoClass):
-    """event callback class"""
+    """output callback class"""
     
     _com_interfaces_ = [DbgEng.IDebugOutputCallbacks]
 
@@ -207,7 +222,7 @@ class Registers:
     """registers class"""
 
     def __init__(self, debug_client):
-        """initiate registers class"""
+        """initialize registers class"""
         
         self.__debug_client = debug_client
         self.__registers = debug_client.QueryInterface(DbgEng.IDebugRegisters)
@@ -338,7 +353,7 @@ class DataSpace:
     """data space class"""
 
     def __init__(self, debug_client):
-        """initiate data space class"""
+        """initialize data space class"""
 
         self.__debug_client = debug_client
         self.__data_space = debug_client.QueryInterface(DbgEng.IDebugDataSpaces)
@@ -390,7 +405,7 @@ class PyDbgX:
     """debugger class"""
 
     def __init__(self, event_cb=None, output=False):
-        """initiate the debugger"""
+        """initialize the debugger"""
         
         logger.info('[*] Initiate DebugClient')
         self.__debug_client = POINTER(DbgEng.IDebugClient)()
@@ -781,54 +796,6 @@ class PyDbgX:
         return event_type.value, process_id.value, thread_id.value
         
 
-class MyclassDebugEventCallbacks(DebugEventCallbacks):
-
-    def __init__(self, mask=0):
-        super(DebugEventCallbacks, self).__init__()
-        self.__mask = mask
-
-    def GetInterestMask(self):
-        logger.debug('[*] My GetInterestMask Callback')
-        logger.debug('[D] Mask: ' + str(self.__mask))
-        return self.__mask
-    
-    def Breakpoint(self, Bp):
-        logger.debug('[*] My Breakpoint Callback')
-        try:
-            self.__handle_breakpoint(Bp)
-        except Exception as e:
-            print e
-        return DbgEng.DEBUG_STATUS_BREAK
-    
-    def __handle_breakpoint(self, Bp):
-        Param = Bp.GetParameters()
-        if Param.BreakType == DbgEng.DEBUG_BREAKPOINT_CODE:
-            
-            print 'Breakpoint Hit Address:', hex(Param.Offset)
-            
-            buffer_size = Param.OffsetExpressionSize + 1
-            buffer = create_string_buffer(buffer_size)
-            expression_size = c_ulong(0)
-            
-            hr = Bp._IDebugBreakpoint__com_GetOffsetExpression(buffer, buffer_size, byref(expression_size))
-            if S_OK != hr:
-                raise Exception('GetOffsetExpression() fail.')
-            
-            if expression_size.value > 1:
-                expression = buffer.value
-                print 'Breakpoint Expression:', expression
-
-                if -1 != expression.find('CreateFileW'):
-                    debug_client = Bp.GetAdder()
-                    r = Registers(debug_client)
-                    esp = r.get_stack()
-                    m = DataSpace(debug_client)
-                    data = m.read_memory(esp+4, 4)
-                    addr = struct.unpack('<I', data)[0]
-                    data = m.read_wide_string(addr)
-                    print 'File Created:', data.decode('utf16')
-
-
 if __name__ == '__main__':
 
     logger = logging.getLogger('pydbgx')
@@ -853,13 +820,5 @@ if __name__ == '__main__':
     ch.setFormatter(formatter)
     logger.addHandler(ch)
 
-    mask = DbgEng.DEBUG_EVENT_BREAKPOINT
-    event_callback = MyclassDebugEventCallbacks(mask)
-    dbgx = PyDbgX(event_cb=event_callback)
-    #dbgx = PyDbgX(output=True)
-    #dbgx.list_running_process()
-    dbgx.create_process('notepad.exe', True)
-    dbgx.active_process()
-    #dbgx.set_software_breakpoint_addr(0x01003689)
-    dbgx.set_software_breakpoint_exp('kernel32!CreateFileW')
-    dbgx.wait_for_event()
+    dbgx = PyDbgX()
+    dbgx.list_running_process()
