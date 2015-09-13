@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 pydbgx example:
-    Breakpoint test.
+    Http API hook test.
 """
 
 import os
@@ -18,21 +18,29 @@ from comtypes.hresult import S_OK, S_FALSE
 
 
 class MyDebugEventCallbacks(DebugEventCallbacks):
-    """event callbacks"""
+    """DebugEventCallbacks"""
 
     def __init__(self, mask=0):
-        """initialize event callbacks"""
+        """MyDebugEventCallbacks initialization"""
 
         super(DebugEventCallbacks, self).__init__()
         self.__mask = mask
+        self.__pydbgx = None
 
+    def bind_pydbgx(self, pydbgx):
+        """bind pydbgx"""
+
+        self.__pydbgx = pydbgx
+        
     def GetInterestMask(self):
         """set interest mask"""
 
+        logger.debug('[*] My GetInterestMask Callback')
+        logger.debug('[D] mask: ' + str(hex(mask)))
         return self.__mask
     
     def Breakpoint(self, Bp):
-        """breakpoint callback"""
+        """Breakpoint callback"""
 
         logger.debug('[*] My Breakpoint Callback')
         try:
@@ -47,7 +55,7 @@ class MyDebugEventCallbacks(DebugEventCallbacks):
         Param = Bp.GetParameters()
         if Param.BreakType == DbgEng.DEBUG_BREAKPOINT_CODE:
             
-            print 'Breakpoint Hit Address:', hex(Param.Offset)
+            print 'Breakpoint Hit on Address:', hex(Param.Offset)
             
             buffer_size = Param.OffsetExpressionSize + 1
             buffer = create_string_buffer(buffer_size)
@@ -65,11 +73,26 @@ class MyDebugEventCallbacks(DebugEventCallbacks):
                     debug_client = Bp.GetAdder()
                     r = Registers(debug_client)
                     esp = r.get_stack()
+                    logger.debug('[D] esp: ' + hex(esp))
                     m = DataSpace(debug_client)
                     data = m.read_memory(esp+4, 4)
                     addr = struct.unpack('<I', data)[0]
+                    logger.debug('[D] First Parameter Address: ' + hex(addr))
                     data = m.read_wide_string(addr)
                     print 'File Created:', data.decode('utf16')
+
+
+    def LoadModule(self, ImageFileHandle, BaseOffset, ModuleSize, ModuleName, ImageName, CheckSum, TimeDateStamp):
+        """LoadModule callback"""
+
+        logger.debug('[*] My LoadModule Callback')
+        try:
+            if -1 != ModuleName.find("KERNEL32"):
+                # set a breakpoint on API CreateFileW
+                self.__pydbgx.set_software_breakpoint_exp('Kernel32!CreateFileW')
+        except Exception as e:
+            print e
+        return DbgEng.DEBUG_STATUS_NO_CHANGE
 
 
 if __name__ == '__main__':
@@ -96,27 +119,27 @@ if __name__ == '__main__':
 
     ch.setFormatter(formatter)
     logger.addHandler(ch)
-
+    
     # register our own event callbacks
-    mask = DbgEng.DEBUG_EVENT_BREAKPOINT
+    mask = DbgEng.DEBUG_EVENT_BREAKPOINT | DbgEng.DEBUG_EVENT_LOAD_MODULE
     event_callback = MyDebugEventCallbacks(mask)
 
     # initialize the debugger
     dbgx = PyDbgX(event_cb=event_callback)
 
-    # create target process: notepad.exe
+    # bind PyDbgX class to event callbakcs
+    event_callback.bind_pydbgx(dbgx)
+
+    # create target process: iexplore.exe
     # note: can not debug x64 executable if you use 32 bit python
-    dbgx.create_process('notepad.exe')
+    dbgx.create_process('c:\\Program Files (x86)\\Internet Explorer\\iexplore.exe', True)
 
     # active the process so that we can set breakpoints on it
     dbgx.active_process()
 
-    # set a breakpoint on API CreateFileW
-    dbgx.set_software_breakpoint_exp('Kernel32!CreateFileW')
-
     # set the effective processor to x86 if you use the 64 bit dbgeng.dll
     dbgx.set_effective_processor('x86')
-
+    
     # wait for debug event
     dbgx.wait_for_event_ex()
 
