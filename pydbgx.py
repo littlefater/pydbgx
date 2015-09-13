@@ -879,6 +879,10 @@ class PyDbgX:
     def list_event_filtes(self):
         """list event filtes"""
 
+        print '*' * 30
+        print 'Event Filtes'
+        print '*' * 30
+
         specific_events, specific_exceptions, arbitrary_exceptions = self.__debug_control.get_number_event_filters()
         total = specific_events + specific_exceptions
         
@@ -951,5 +955,9 @@ if __name__ == '__main__':
     logger.addHandler(ch)
 
     dbgx = PyDbgX()
+    
     dbgx.list_running_process()
+    
+    dbgx.list_event_filtes()
+    
     
