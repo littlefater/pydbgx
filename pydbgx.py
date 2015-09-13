@@ -33,6 +33,22 @@ from comtypes.automation import IID, GUID
 from comtypes.client import GetModule
 
 
+logger = logging.getLogger('pydbgx')
+LogLevel = logging.WARNING
+logger.setLevel(LogLevel)
+
+
+DEBUG_PROCESS = 0x00000001
+DEBUG_ONLY_THIS_PROCESS = 0x00000002
+DEBUG_CREATE_PROCESS_NO_DEBUG_HEAP = 0x00000400
+E_FAIL = 0x80004005
+E_PENDING = 0x8000000A
+E_UNEXPECTED = 0x8000FFFF
+INFINITE = 0xFFFFFFFF
+IMAGE_FILE_MACHINE_I386 = 0x014c
+IMAGE_FILE_MACHINE_AMD64 = 0x8664
+
+
 CurrentDir = os.path.dirname(os.path.abspath(__file__))
 DbgEngTlb = os.path.join(CurrentDir, 'helper', 'DbgEng.tlb')
 LibFolder = os.path.join(CurrentDir, 'lib')
@@ -88,29 +104,13 @@ except:
     exit(0)
 
 
-logger = logging.getLogger('pydbgx')
-LogLevel = logging.WARNING
-logger.setLevel(LogLevel)
-
-
-########################################
-DEBUG_PROCESS = 0x00000001
-DEBUG_ONLY_THIS_PROCESS = 0x00000002
-DEBUG_CREATE_PROCESS_NO_DEBUG_HEAP = 0x00000400
-E_FAIL = 0x80004005
-E_PENDING = 0x8000000A
-E_UNEXPECTED = 0x8000FFFF
-INFINITE = 0xFFFFFFFF
-########################################
-
-
 class DebugEventCallbacks(CoClass):
-    """event callback class"""
+    """IDebugEventCallbacks Implementation"""
     
     _com_interfaces_ = [DbgEng.IDebugEventCallbacks]
     
     def __init__(self, mask=0):
-        """initialize event callbacks"""
+        """DebugEventCallbacks initialization"""
         
         super(DebugEventCallbacks, self).__init__()
         self.__mask = mask
@@ -205,11 +205,13 @@ class DebugEventCallbacks(CoClass):
     
 
 class DebugOutputCallbacks(CoClass):
-    """output callback class"""
+    """IDebugOutputCallbacks Implementation"""
     
     _com_interfaces_ = [DbgEng.IDebugOutputCallbacks]
 
     def __init__(self):
+        """DebugOutputCallbacks initialization"""
+
         super(DebugOutputCallbacks, self).__init__()
 
     def Output(self, Mask, Text):
@@ -219,10 +221,10 @@ class DebugOutputCallbacks(CoClass):
 
 
 class Registers:
-    """registers class"""
+    """IDebugRegisters Wrapper"""
 
     def __init__(self, debug_client):
-        """initialize registers class"""
+        """Registers initialization"""
         
         self.__debug_client = debug_client
         self.__registers = debug_client.QueryInterface(DbgEng.IDebugRegisters)
@@ -350,10 +352,10 @@ class Registers:
 
         
 class DataSpace:
-    """data space class"""
+    """IDebugDataSpaces Wrapper"""
 
     def __init__(self, debug_client):
-        """initialize data space class"""
+        """DataSpace initialization"""
 
         self.__debug_client = debug_client
         self.__data_space = debug_client.QueryInterface(DbgEng.IDebugDataSpaces)
@@ -399,41 +401,349 @@ class DataSpace:
     def search(self):
         """search virtual address"""
         pass
-    
-        
-class PyDbgX:
-    """debugger class"""
 
-    def __init__(self, event_cb=None, output=False):
-        """initialize the debugger"""
+
+class DebugClient:
+    """IDebugClient Wrapper"""
+    
+    def __init__(self):
+        """DebugClient initialization"""
+
+        self.__debug_create()
+
+
+    def __debug_create(self):
+        """create IDebugClient"""
         
-        logger.info('[*] Initiate DebugClient')
-        self.__debug_client = POINTER(DbgEng.IDebugClient)()
-        hr = DebugCreate(byref(DbgEng.IDebugClient._iid_), byref(self.__debug_client))
+        self.__idebug_client = POINTER(DbgEng.IDebugClient)()
+        hr = DebugCreate(byref(DbgEng.IDebugClient._iid_), byref(self.__idebug_client))
         if S_OK != hr:
             raise Exception('DebugCreate() fail.')
         else:
-            logger.info('[I] Initiate DebugClient Success')
+            logger.debug('[D] DebugClient: ' + str(self.__idebug_client))
 
-        logger.debug('[D] Indentity: ' + self.get_indentity())
-    
-        logger.info('[*] Initiate DebugControl')
-        self.__debug_control = self.__debug_client.QueryInterface(DbgEng.IDebugControl)
-        if self.__debug_control is None:
-            raise Exception('Query interface IDebugControl fail.')
-        else:
-            logger.info('[I] Initiate DebugControl Success')
+    def query_interface(self, interface):
+        """IDebugClient::QueryInterface method"""
+
+        return self.__idebug_client.QueryInterface(interface)
+
+
+    def get_indentity(self):
+        """IDebugClient::GetIdentity method"""
+
+        buffer_size = 0x100
+        identity_size = c_ulong(0)
+        hr = self.__idebug_client._IDebugClient__com_GetIdentity(None, buffer_size, byref(identity_size))
+        if S_OK != hr:
+            raise Exception('GetIdentity() fail.')
+
+        buffer_size = identity_size.value + 1
+        buffer = create_string_buffer(buffer_size)
+        hr = self.__idebug_client._IDebugClient__com_GetIdentity(buffer, buffer_size, byref(identity_size))
+        if S_OK != hr:
+            raise Exception('GetIdentity() fail.')
         
+        return buffer.value
+
+    def set_event_callbacks(self, event_callbacks):
+        """IDebugClient::SetEventCallbacks method"""
+
+        hr = self.__idebug_client.SetEventCallbacks(event_callbacks)
+        if S_OK != hr:
+            raise Exception('SetEventCallbacks() fail.')
+
+    def get_event_callbacks(self):
+        """IDebugClient::GetEventCallbacks method"""
+
+        return self.__idebug_client.GetEventCallbacks()
+
+    def set_output_callbacks(self, output_callbacks):
+        """IDebugClient::SetOutputCallbacks method"""
+
+        hr = self.__idebug_client.SetOutputCallbacks(output_callbacks)
+        if S_OK != hr:
+            raise Exception('SetOutputCallbacks() fail.')
+
+    def get_output_callbacks(self):
+        """IDebugClient::GetOutputCallbacks method"""
+
+        return self.__idebug_client.GetOutputCallbacks()
+
+    def get_running_process_ids(self):
+        """IDebugClient::GetRunningProcessSystemIds method"""
+
+        server = 0
+        count = 256
+        ids = (c_ulong * count)()
+        actual_count = c_ulong(0)
+        hr = self.__idebug_client._IDebugClient__com_GetRunningProcessSystemIds(server, ids, count, byref(actual_count))
+        if S_OK != hr:
+            raise Exception('GetRunningProcessSystemIds() fail.')
+
+        return ids, actual_count.value
+
+    def get_running_process_desc(self, sysid):
+        """IDebugClient::GetRunningProcessDescription method"""
+
+        try:
+            server = 0
+            flags  = DbgEng.DEBUG_PROC_DESC_NO_PATHS
+            exename_size = 0x100
+            exename = create_string_buffer(exename_size)
+            actual_exename_size = c_ulong(0)
+            description_size = 0x100
+            description = create_string_buffer(description_size)
+            actual_description_size = c_ulong(0)
+                
+            hr = self.__idebug_client._IDebugClient__com_GetRunningProcessDescription(
+                server, sysid, flags,
+                exename, exename_size, byref(actual_exename_size),
+                description, description_size, byref(actual_description_size))
+                
+            if S_OK != hr:
+                if S_FALSE == hr:
+                    exename_size = actual_exename_size.value + 1
+                    exename = create_string_buffer(exename_size)
+                    description_size = actual_description_size.value + 1
+                    description = create_string_buffer(description_size)
+                        
+                    hr = self.__idebug_client._IDebugClient__com_GetRunningProcessDescription(
+                        server, sysid, flags,
+                        exename, exename_size, byref(actual_exename_size),
+                        description, description_size, byref(actual_description_size))
+                    if S_OK != hr:
+                        raise Exception('GetRunningProcessDescription() fail.')
+                else:
+                    raise Exception('GetRunningProcessDescription() fail.')
+                    
+        except COMError, msg:
+            print 'No enough privilege to retrieve process information.'
+
+        return exename.value, description.value
+
+    def create_process(self, cmd, flags):
+        """IDebugClient::CreateProcess method"""
+
+        server = 0
+        hr = self.__idebug_client.CreateProcess(server, cmd, flags)
+        if S_OK != hr:
+            raise Exception('CreateProcess() fail.')
+
+    def get_exit_code(self):
+        """IDebugClient::GetExitCode method"""
+
+        return self.__idebug_client.GetExitCode()
+
+
+class DebugControl:
+    """IDebugControl Wrapper"""
+
+    def __init__(self, debug_client):
+        """DebugControl initialization"""
+
+        self.__idebug_control = debug_client.query_interface(DbgEng.IDebugControl)
+        logger.debug('[D] DebugControl: ' + str(self.__idebug_control))
+
+    def wait_for_event(self, timeout):
+        """IDebugControl::WaitForEvent method"""
+
+        flags = DbgEng.DEBUG_WAIT_DEFAULT
+        hr = self.__idebug_control.WaitForEvent(flags, timeout)
+        if S_OK == hr:
+            logger.debug('[D] WaitForEvent OK')
+        elif S_FALSE == hr:
+            logger.debug('[D] WaitForEvent FALSE')
+        elif E_FAIL == hr:
+            raise Exception('WaitForEvent FAIL')
+        elif E_PENDING == hr:
+            logger.debug('[D] WaitForEvent PENDING')
+        elif E_UNEXPECTED == hr:
+            raise Exception('WaitForEvent UNEXPECTED')
+        else:
+            raise Exception('WaitForEvent UNKNOWN')
+
+    def execute(self, cmd):
+        """IDebugControl::Execute method"""
+
+        hr = self.__idebug_control.Execute(DbgEng.DEBUG_OUTCTL_THIS_CLIENT, cmd, DbgEng.DEBUG_EXECUTE_ECHO)
+        if S_OK != hr:
+            raise Exception('Execute() fail.')
+
+    def add_breakpoint(self, type, desired_id):
+        """IDebugControl::AddBreakpoint method"""
+
+        return self.__idebug_control.AddBreakpoint(type, desired_id)
+
+    def get_execution_status(self):
+        """IDebugControl::GetExecutionStatus method"""
+
+        return self.__idebug_control.GetExecutionStatus()
+
+    def set_effective_processor_type(self, type):
+        """IDebugControl::SetEffectiveProcessorType method"""
+        
+        logger.debug('[D] SetEffectiveProcessorType: ' + hex(type))
+        hr = self.__idebug_control.SetEffectiveProcessorType(type)
+        if S_OK != hr:
+            raise Exception('SetEffectiveProcessorType() fail.')
+
+    def get_effective_processor_type(self):
+        """IDebugControl::GetEffectiveProcessorType method"""
+        
+        return self.__idebug_control.GetEffectiveProcessorType()
+
+    def get_last_event(self):
+        """IDebugControl::GetLastEventInformation method"""
+
+        logger.debug('[*] Get Last Event')
+        event_type = c_ulong(0)
+        process_id = c_ulong(0)
+        thread_id = c_ulong(0)
+        extra_information_size = 0x1000
+        extra_information = create_string_buffer(extra_information_size)
+        extra_information_used = c_ulong(0)
+        description_size = 0x1000
+        description = create_string_buffer(description_size)
+        description_used = c_ulong(0)
+        
+        hr = self.__idebug_control._IDebugControl__com_GetLastEventInformation(
+            byref(event_type), byref(process_id), byref(thread_id),
+            extra_information, extra_information_size, byref(extra_information_used),
+            description, description_size, byref(description_used))
+        
+        if S_OK != hr:
+            if S_FALSE == hr:
+                extra_information_size = extra_information_used.value + 1
+                extra_information = create_string_buffer(extra_information_size)
+                description_size = description_used.value + 1
+                description = create_string_buffer(description_size)
+                
+                hr = self.__idebug_control._IDebugControl__com_GetLastEventInformation(
+                    byref(event_type), byref(process_id), byref(thread_id),
+                    extra_information, extra_information_size, byref(extra_information_used),
+                    description, description_size, byref(description_used))
+
+                if S_OK != hr:
+                    raise Exception('GetLastEventInformation() fail.')
+            else:
+                raise Exception('GetLastEventInformation() fail.')
+
+        logger.debug('[D] Type: ' + str(hex(event_type.value)))
+        logger.debug('[D] ProcessID: ' + str(hex(process_id.value)))
+        logger.debug('[D] ThreadID: ' + str(hex(thread_id.value)))
+        if extra_information_used.value > 0:
+            logger.debug('[D] ExtraInformation: ' + extra_information.value)
+        if description_used.value > 1:
+            logger.debug('[D] Description: ' + description.value)
+        
+        return event_type.value, process_id.value, thread_id.value, extra_information.value, description.value
+
+    def get_number_event_filters(self):
+        """IDebugControl::GetNumberEventFilters method"""
+
+        return self.__idebug_control.GetNumberEventFilters()
+
+    def get_event_filter_text(self, index):
+        """IDebugControl::GetEventFilterText method"""
+
+        buffer_size = 0x100
+        buffer = create_string_buffer(buffer_size)
+        text_size = c_ulong(0)
+        
+        hr = self.__idebug_control._IDebugControl__com_GetEventFilterText(
+            index, buffer, buffer_size, byref(text_size))
+
+        if S_OK != hr:
+            if S_FALSE == hr:
+                buffer_size = text_size.value + 1
+                buffer = create_string_buffer(buffer_size)
+                hr = self.__idebug_control._IDebugControl__com_GetEventFilterText(
+                    index, buffer, buffer_size, byref(text_size))
+                if S_OK != hr:
+                    raise Exception('GetEventFilterText() fail.')
+            else:
+                raise Exception('GetEventFilterText() fail.')
+
+        return buffer.value
+
+    def get_event_filter_command(self, index):
+        """IDebugControl::GetEventFilterCommand method"""
+
+        buffer_size = 0x100
+        buffer = create_string_buffer(buffer_size)
+        command_size = c_ulong(0)
+        
+        hr = self.__idebug_control._IDebugControl__com_GetEventFilterCommand(
+            index, buffer, buffer_size, byref(command_size))
+        
+        if S_OK != hr:
+            if S_FALSE == hr:
+                buffer_size = command_size.value + 1
+                buffer = create_string_buffer(buffer_size)
+                hr = self.__idebug_control._IDebugControl__com_GetEventFilterCommand(
+                    index, buffer, buffer_size, byref(command_size))
+                if S_OK != hr:
+                    raise Exception('GetEventFilterCommand() fail.')
+            else:
+                raise Exception('GetEventFilterCommand() fail.')
+
+        return buffer.value
+
+    def get_specific_filter_argument(self, index):
+        """IDebugControl::GetSpecificFilterArgument method"""
+        
+        try:
+            buffer_size = 0x100
+            buffer = create_string_buffer(buffer_size)
+            argument_size = c_ulong(0)
+            hr = self.__idebug_control._IDebugControl__com_GetSpecificFilterArgument(
+                index, buffer, buffer_size, byref(argument_size))
+            if S_OK != hr:
+                if S_FALSE == hr:
+                    buffer_size = argument_size.value + 1
+                    buffer = create_string_buffer(buffer_size)
+                    hr = self.__idebug_control._IDebugControl__com_GetSpecificFilterArgument(
+                        index, buffer, buffer_size, byref(argument_size))
+                    if S_OK != hr:
+                        raise Exception('GetEventFilterArgument() fail.')
+                else:
+                    raise Exception('GetEventFilterArgument() fail.')
+                
+        except COMError, msg:
+            return None
+
+        return buffer.value
+
+
+class PyDbgX:
+    """debugger class"""
+
+    def __init__(self, event_cb=None, output_cb=None):
+        """initialize the debugger"""
+        
+        logger.info('[*] Initiate DebugClient')
+        self.__debug_client = DebugClient()
+        logger.info('[I] Initiate DebugClient Success')
+        
+        logger.debug('[D] Indentity: ' + self.__debug_client.get_indentity())
+        
+        logger.info('[*] Initiate DebugControl')
+        self.__debug_control = DebugControl(self.__debug_client)
+        logger.info('[I] Initiate DebugControl Success')
+
+        
+        '''
         logger.info('[*] Initiate DebugSystemObjects')
         self.__debug_system = self.__debug_client.QueryInterface(DbgEng.IDebugSystemObjects)
         if self.__debug_system is None:
             raise Exception('Query interface IDebugSystemObjects fail.')
         else:
             logger.info('[I] Initiate DebugSystemObjects Success')
-
+        '''
+        
         logger.info('[*] Set DebugEventCallbacks')
         if event_cb is None:
-            mask = DbgEng.DEBUG_EVENT_CREATE_PROCESS | DbgEng.DEBUG_EVENT_BREAKPOINT
+            mask = DbgEng.DEBUG_EVENT_BREAKPOINT
             '''
                 DbgEng.DEBUG_EVENT_BREAKPOINT | \
                 DbgEng.DEBUG_EVENT_EXCEPTION | \
@@ -453,152 +763,91 @@ class PyDbgX:
         else:
             event_callbacks = event_cb
         
-        hr = self.__debug_client.SetEventCallbacks(event_callbacks)
-        if S_OK != hr:
-            raise Exception('SetEventCallbacks() fail.')
-        else:
-            logger.info('[I] Set DebugEventCallbacks Success')
-
-        logger.debug('[D] EventCallbacks: ' + str(self.__debug_client.GetEventCallbacks()))
-
-        if output:
+        self.__debug_client.set_event_callbacks(event_cb)
+        logger.info('[I] Set DebugEventCallbacks Success')
+        
+        logger.debug('[D] EventCallbacks: ' + str(self.__debug_client.get_event_callbacks()))
+        
+        if output_cb is not None:
             logger.info('[*] Set OutputCallbacks')
-            output_callbacks = DebugOutputCallbacks()
-            hr = self.__debug_client.SetOutputCallbacks(output_callbacks)
-            if S_OK != hr:
-                raise Exception('SetOutputCallbacks() fail.')
+            
+            if output_cb == 'default':
+                output_callbacks = DebugOutputCallbacks()
             else:
-                logger.info('[I] Set OutputCallbacks Success')
+                output_callbacks = output_cb
 
-            logger.debug('[D] OutputCallbacks: ' + str(self.__debug_client.GetOutputCallbacks()))
+            self.__debug_client.set_output_callbacks(output_callbacks)
+            logger.info('[I] Set OutputCallbacks Success')
+            logger.debug('[D] OutputCallbacks: ' + str(self.__debug_client.get_output_callbacks()))
 
         self.__software_breakpoints = list()
-        
-        
-    def get_indentity(self):
-        """IDebugClient::GetIdentity method"""
-
-        buffer_size = 0x100
-        identity_size = c_ulong(0)
-        hr = self.__debug_client._IDebugClient__com_GetIdentity(None, buffer_size, byref(identity_size))
-        if S_OK != hr:
-            raise Exception('GetIdentity() fail.')
-
-        buffer_size = identity_size.value + 1
-        buffer = create_string_buffer(buffer_size)
-        hr = self.__debug_client._IDebugClient__com_GetIdentity(buffer, buffer_size, byref(identity_size))
-        if S_OK != hr:
-            raise Exception('GetIdentity() fail.')
-        
-        return buffer.value
     
     def list_running_process(self):
-        """List running processes"""
+        """list running processes"""
 
-        server = 0
-        count = 128
-        ids = (c_ulong * count)()
-        actual_count = c_ulong(0)
-        hr = self.__debug_client._IDebugClient__com_GetRunningProcessSystemIds(server, ids, count, byref(actual_count))
-        if S_OK != hr:
-            raise Exception('GetRunningProcessSystemIds() fail.')
+        ids, actual_count = self.__debug_client.get_running_process_ids()
 
         print '*' * 30
         print 'Process Information'
         print '*' * 30
         
-        for i in range(0, actual_count.value):
+        for i in range(0, actual_count):
             
             print 'Process ID:', ids[i]
+
+            exename, description = self.__debug_client.get_running_process_desc(ids[i])
+            print 'Process Name:', exename
+            if len(description) > 1:
+                for desc in description.split('  '):
+                    print desc
             
-            try:
-                flags  = DbgEng.DEBUG_PROC_DESC_NO_PATHS
-                exename_size = 0x100
-                exename = create_string_buffer(exename_size)
-                actual_exename_size = c_ulong(0)
-                description_size = 0x100
-                description = create_string_buffer(description_size)
-                actual_description_size = c_ulong(0)
-                
-                hr = self.__debug_client._IDebugClient__com_GetRunningProcessDescription(
-                    server, ids[i], flags,
-                    exename, exename_size, byref(actual_exename_size),
-                    description, description_size, byref(actual_description_size))
-                
-                if S_OK != hr:
-                    if S_FALSE == hr:
-                        exename_size = actual_exename_size.value + 1
-                        exename = create_string_buffer(exename_size)
-                        description_size = actual_description_size.value + 1
-                        description = create_string_buffer(description_size)
-                        
-                        hr = self.__debug_client._IDebugClient__com_GetRunningProcessDescription(
-                            server, ids[i], flags,
-                            exename, exename_size, byref(actual_exename_size),
-                            description, description_size, byref(actual_description_size))
-                        if S_OK != hr:
-                            raise Exception('GetRunningProcessDescription() fail.')
-                    else:
-                        raise Exception('GetRunningProcessDescription() fail.')
-                    
-                print 'Process Name:', exename.value
-                if actual_description_size.value > 1:
-                    for desc in description.value.split('  '):
-                        print desc
-            except COMError:
-                print 'No enough privilege to retrieve process information.'
             print '-' * 30
     
-    def create_process(self, cmd, follow_child=False):
+    def create_process(self, cmd, follow_child=False, debug_heap=False):
         """create target process"""
 
         logger.info('[*] Create Process')
         logger.info('[I] Command: ' + cmd)
         logger.info('[I] FollowChild: ' + str(follow_child))
         
-        if follow_child:
+        if True == follow_child:
             flags = DEBUG_PROCESS
         else:
             flags = DEBUG_ONLY_THIS_PROCESS
 
-        flags |= DEBUG_CREATE_PROCESS_NO_DEBUG_HEAP      # Prevents the debug heap from being used in the new process.
-        server = 0
-        hr = self.__debug_client.CreateProcess(server, cmd, flags)
-        if S_OK != hr:
-            raise Exception('CreateProcess() fail.')
-        else:
-            logger.info('[I] Create Process Success')
+        if False == debug_heap:
+            flags |= DEBUG_CREATE_PROCESS_NO_DEBUG_HEAP      # Prevents the debug heap from being used in the new process.
+        
+        hr = self.__debug_client.create_process(cmd, flags)
+        logger.info('[I] Create Process Success')
 
-        logger.debug('[D] Indentity: ' + self.get_indentity())
+        logger.debug('[D] Indentity: ' + self.__debug_client.get_indentity())
+
+    def set_effective_processor(self, processor_type):
+        """set effective processor type"""
+
+        if processor_type == 'x86':
+            type = IMAGE_FILE_MACHINE_I386
+        elif processor_type == 'x64':
+            type = IMAGE_FILE_MACHINE_AMD64
+        else:
+            raise Exception('Unsupported type.')
+
+        self.__debug_control.set_effective_processor_type(type)
 
     def active_process(self):
-        flags = DbgEng.DEBUG_WAIT_DEFAULT
-        timeout = 0
-        hr = self.__debug_control.WaitForEvent(flags, timeout)
-        if S_OK == hr:
-            logger.debug('[D] WaitForEvent OK')
-        elif S_FALSE == hr:
-            logger.debug('[D] WaitForEvent FALSE')
-        elif E_FAIL == hr:
-            raise Exception('WaitForEvent FAIL')
-        elif E_PENDING == hr:
-            logger.debug('[D] WaitForEvent PENDING')
-        elif E_UNEXPECTED == hr:
-            raise Exception('WaitForEvent UNEXPECTED')
-        else:
-            raise Exception('WaitForEvent UNKNOWN')
+        """active process"""
+            
+        self.__debug_control.wait_for_event(0)
+        self.__debug_control.execute('|0s')
         
-        hr = self.__debug_control.Execute(DbgEng.DEBUG_OUTCTL_THIS_CLIENT, '|0s', DbgEng.DEBUG_EXECUTE_ECHO)
-        if S_OK != hr:
-            raise Exception('Execute() fail.')
 
     def set_software_breakpoint_addr(self, address):
         """set software breakpoint"""
 
-        logger.debug('[D] Add breakpoint on address: ' + str(hex(address)))
-        software_breakpoint = self.__debug_control.AddBreakpoint(DbgEng.DEBUG_BREAKPOINT_CODE, DbgEng.DEBUG_ANY_ID)
-        if software_breakpoint is None:
-            raise Exception('AddBreakpoint() fail.')
+        logger.debug('[*] Add Breakpoint on Address: ' + str(hex(address)))
+        software_breakpoint = self.__debug_control.add_breakpoint(DbgEng.DEBUG_BREAKPOINT_CODE, DbgEng.DEBUG_ANY_ID)
+        logger.debug('[D] Breakpoint: ' + str(software_breakpoint))
 
         hr = software_breakpoint.SetOffset(address)
         if S_OK != hr:
@@ -608,18 +857,15 @@ class PyDbgX:
         if S_OK != hr:
             raise Exception('AddFlags() fail.')
 
-        logger.debug('[D] Breakpoint: ' + str(software_breakpoint))
-
         self.__software_breakpoints.append(software_breakpoint)
     
     def set_software_breakpoint_exp(self, expression):
         """set software breakpoint expression"""
 
-        logger.debug('[D] Add breakpoint expression: ' + expression)
-        software_breakpoint = self.__debug_control.AddBreakpoint(DbgEng.DEBUG_BREAKPOINT_CODE, DbgEng.DEBUG_ANY_ID)
-        if software_breakpoint is None:
-            raise Exception('AddBreakpoint() fail.')
-
+        logger.debug('[*] Add Breakpoint Expression: ' + expression)
+        software_breakpoint = self.__debug_control.add_breakpoint(DbgEng.DEBUG_BREAKPOINT_CODE, DbgEng.DEBUG_ANY_ID)
+        logger.debug('[D] Breakpoint: ' + str(software_breakpoint))
+        
         hr = software_breakpoint.SetOffsetExpression(expression)
         if S_OK != hr:
             raise Exception('SetOffsetExpression() fail.')
@@ -628,46 +874,12 @@ class PyDbgX:
         if S_OK != hr:
             raise Exception('AddFlags() fail.')
 
-        logger.debug('[D] Breakpoint: ' + str(software_breakpoint))
-
         self.__software_breakpoints.append(software_breakpoint)
-
-    def wait_for_event(self):
-        """IDebugControl::WaitForEvent method"""
-
-        logger.debug('[D] ExecStatus: ' + str(hex(self.__debug_control.GetExecutionStatus())))
-        
-        logger.info('[*] WaitForEvent')
-        flags = DbgEng.DEBUG_WAIT_DEFAULT
-        timeout = INFINITE
-        while True:
-            try:
-                hr = self.__debug_control.WaitForEvent(flags, INFINITE)
-            except COMError:
-                print 'Unknown error.'
-                exit(0)
-            if S_OK == hr:
-                logger.debug('[D] WaitForEvent OK')
-            elif S_FALSE == hr:
-                logger.debug('[D] WaitForEvent FALSE')
-            elif E_FAIL == hr:
-                raise Exception('WaitForEvent FAIL')
-            elif E_PENDING == hr:
-                logger.debug('[D] WaitForEvent PENDING')
-                break
-            elif E_UNEXPECTED == hr:
-                logger.debug('[D] WaitForEvent UNEXPECTED')
-                break
-            else:
-                raise Exception('WaitForEvent UNKNOWN')
-            self.__debug_control.Execute(DbgEng.DEBUG_OUTCTL_THIS_CLIENT, '.lastevent', DbgEng.DEBUG_EXECUTE_ECHO)
-            self.get_last_event()
-            logger.debug('[D] ExitCode: ' + str(self.__debug_client.GetExitCode()))
 
     def list_event_filtes(self):
         """list event filtes"""
 
-        specific_events, specific_exceptions, arbitrary_exceptions = self.__debug_control.GetNumberEventFilters()
+        specific_events, specific_exceptions, arbitrary_exceptions = self.__debug_control.get_number_event_filters()
         total = specific_events + specific_exceptions
         
         if total == 0:
@@ -678,122 +890,40 @@ class PyDbgX:
 
             print 'Filter #' + str(index) + ':'
 
-            buffer_size = 0x100
-            buffer = create_string_buffer(buffer_size)
-            text_size = c_ulong(0)
-            hr = self.__debug_control._IDebugControl__com_GetEventFilterText(index,
-                buffer,
-                buffer_size,
-                byref(text_size))
-            if S_OK != hr:
-                if S_FALSE == hr:
-                    buffer_size = text_size.value + 1
-                    buffer = create_string_buffer(buffer_size)
-                    hr = self.__debug_control._IDebugControl__com_GetEventFilterText(index,
-                        buffer,
-                        buffer_size,
-                        byref(text_size))
-                    if S_OK != hr:
-                        raise Exception('GetEventFilterText() fail.')
-                else:
-                    raise Exception('GetEventFilterText() fail.')
-            if text_size.value > 1:
-                print buffer.value
+            text = self.__debug_control.get_event_filter_text(index)
+            if len(text) > 1:
+                print text
             
-            buffer_size = 0x100
-            buffer = create_string_buffer(buffer_size)
-            command_size = c_ulong(0)
-            hr = self.__debug_control._IDebugControl__com_GetEventFilterCommand(index,
-                buffer,
-                buffer_size,
-                byref(command_size))
-            if S_OK != hr:
-                if S_FALSE == hr:
-                    buffer_size = command_size.value + 1
-                    buffer = create_string_buffer(buffer_size)
-                    hr = self.__debug_control._IDebugControl__com_GetEventFilterCommand(index,
-                        buffer,
-                        buffer_size,
-                        byref(command_size))
-                    if S_OK != hr:
-                        raise Exception('GetEventFilterCommand() fail.')
-                else:
-                    raise Exception('GetEventFilterCommand() fail.')
-            if command_size.value > 1:
-                print buffer.value
+            command = self.__debug_control.get_event_filter_command(index)
+            if len(command) > 1:
+                print command
 
-            try:
-                buffer_size = 0x100
-                buffer = create_string_buffer(buffer_size)
-                argument_size = c_ulong(0)
-                hr = self.__debug_control._IDebugControl__com_GetSpecificFilterArgument(index,
-                    buffer,
-                    buffer_size,
-                    byref(argument_size))
-                if S_OK != hr:
-                    if S_FALSE == hr:
-                        buffer_size = argument_size.value + 1
-                        buffer = create_string_buffer(buffer_size)
-                        hr = self.__debug_control._IDebugControl__com_GetSpecificFilterArgument(index,
-                            buffer,
-                            buffer_size,
-                            byref(argument_size))
-                        if S_OK != hr:
-                            raise Exception('GetEventFilterArgument() fail.')
-                    else:
-                        raise Exception('GetEventFilterArgument() fail.')
-                if argument_size.value > 1:
-                    print buffer.value
-            except COMError:
-                pass
+            argument = self.__debug_control.get_specific_filter_argument(index)
+            if argument is not None and len(argument) > 1:
+                print argument
 
             print '-' * 30
-    
-    def get_last_event(self):
-        """IDebugControl::GetLastEventInformation method"""
 
-        logger.debug('[*] Get Last Event')
-        event_type = c_ulong(0)
-        process_id = c_ulong(0)
-        thread_id = c_ulong(0)
-        extra_information_size = 0x1000
-        extra_information = create_string_buffer(extra_information_size)
-        extra_information_used = c_ulong(0)
-        description_size = 0x1000
-        description = create_string_buffer(description_size)
-        description_used = c_ulong(0)
-        
-        hr = self.__debug_control._IDebugControl__com_GetLastEventInformation(
-            byref(event_type), byref(process_id), byref(thread_id),
-            extra_information, extra_information_size, byref(extra_information_used),
-            description, description_size, byref(description_used))
-        
-        if S_OK != hr:
-            if S_FALSE == hr:
-                extra_information_size = extra_information_used.value + 1
-                extra_information = create_string_buffer(extra_information_size)
-                description_size = description_used.value + 1
-                description = create_string_buffer(description_size)
-                
-                hr = self.__debug_control._IDebugControl__com_GetLastEventInformation(
-                    byref(event_type), byref(process_id), byref(thread_id),
-                    extra_information, extra_information_size, byref(extra_information_used),
-                    description, description_size, byref(description_used))
+    def wait_for_event_ex(self):
+        """debug loop"""
 
-                if S_OK != hr:
-                    raise Exception('GetLastEventInformation() fail.')
-            else:
-                raise Exception('GetLastEventInformation() fail.')
-
-        logger.debug('[D] Type: ' + str(hex(event_type.value)))
-        logger.debug('[D] ProcessID: ' + str(hex(process_id.value)))
-        logger.debug('[D] ThreadID: ' + str(hex(thread_id.value)))
-        if extra_information_used.value > 0:
-            logger.debug('[D] ExtraInformation: ' + extra_information.value)
-        if description_used.value > 1:
-            logger.debug('[D] Description: ' + description.value)
+        logger.info('[*] WaitForEvent')
+        logger.debug('[D] ExecStatus: ' + str(hex(self.__debug_control.get_execution_status())))
+        logger.debug('[D] EffectiveProcessorType: ' + str(hex(self.__debug_control.get_effective_processor_type())))
+        #self.list_event_filtes()
         
-        return event_type.value, process_id.value, thread_id.value
+        while True:
+            try:
+                self.__debug_control.wait_for_event(INFINITE)
+            except COMError, msg:
+                if -1 != str(msg).find('Catastrophic failure'):
+                    logger.debug('Process exit.')
+                else:
+                    print 'Unknown error.'
+                exit(0)
+
+            self.__debug_control.get_last_event()
+            logger.debug('[D] ExitCode: ' + str(self.__debug_client.get_exit_code()))
         
 
 if __name__ == '__main__':
@@ -822,3 +952,4 @@ if __name__ == '__main__':
 
     dbgx = PyDbgX()
     dbgx.list_running_process()
+    
