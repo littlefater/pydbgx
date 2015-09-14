@@ -166,6 +166,32 @@ class MyDebugEventCallbacks(DebugEventCallbacks):
                         data = m.read_wide_string(param5)
                         print 'Referer:', data.decode('utf16')
 
+                if -1 != expression.find('HttpSendRequestW'):
+                    
+                    data = m.read_memory(esp+0x04, 4)
+                    param1 = struct.unpack('<I', data)[0]
+                    logger.debug('[D] Parameter1: ' + hex(param1))
+                    print 'hRequest:', hex(param1)
+                    
+                    data = m.read_memory(esp+0x08, 4)
+                    param2 = struct.unpack('<I', data)[0]
+                    logger.debug('[D] Parameter2: ' + hex(param2))
+                    if 0 != param2:
+                        data = m.read_wide_string(param2)
+                        print 'Headers:', data.decode('utf16')
+
+                    data = m.read_memory(esp+0x14, 4)
+                    param3 = struct.unpack('<I', data)[0]
+                    logger.debug('[D] Parameter3: ' + hex(param3))
+
+                    if 0 != param3:
+                        data = m.read_memory(esp+0x10, 4)
+                        param4 = struct.unpack('<I', data)[0]
+                        logger.debug('[D] Parameter4: ' + hex(param4))
+                        if 0 != param4:
+                            data = m.read_memory(param4, param3)
+                            print 'Optional:', data
+                        
     def LoadModule(self, ImageFileHandle, BaseOffset, ModuleSize, ModuleName, ImageName, CheckSum, TimeDateStamp):
         """LoadModule callback"""
 
@@ -179,6 +205,8 @@ class MyDebugEventCallbacks(DebugEventCallbacks):
                 self.__bplist[bpid] = 'InternetConnectW'
                 bpid = self.__pydbgx.set_software_breakpoint_exp(ModuleName + '!HttpOpenRequestW')
                 self.__bplist[bpid] = 'HttpOpenRequestW'
+                bpid = self.__pydbgx.set_software_breakpoint_exp(ModuleName + '!HttpSendRequestW')
+                self.__bplist[bpid] = 'HttpSendRequestW'
         except Exception as e:
             print e
         return DbgEng.DEBUG_STATUS_NO_CHANGE
