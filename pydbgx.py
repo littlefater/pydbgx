@@ -5,6 +5,7 @@ Python wrapper for Windows Debugger Engine API.
 
 import os
 import sys
+import string
 import struct
 import logging
 import platform
@@ -394,6 +395,24 @@ class DataSpace:
             offset += 4
             
         return out_str
+
+    def read_ascii_string(self, offset):
+        """read ascii string"""
+
+        out_str = ''
+
+        while True:
+            data = self.read_memory(offset, 1)
+            if data == None:
+                break
+            if data == '\x00':
+                break
+            if data not in string.printable:
+                break
+            out_str += data
+            offset += 1
+            
+        return out_str
         
     def write_memory(self, offset, buffer):
         """write virtual address"""
@@ -639,7 +658,7 @@ class DebugControl:
         logger.debug('[D] Type: ' + str(hex(event_type.value)))
         logger.debug('[D] ProcessID: ' + str(hex(process_id.value)))
         logger.debug('[D] ThreadID: ' + str(hex(thread_id.value)))
-        if extra_information_used.value > 0:
+        if extra_information_used.value > 1:
             logger.debug('[D] ExtraInformation: ' + extra_information.value)
         if description_used.value > 1:
             logger.debug('[D] Description: ' + description.value)
