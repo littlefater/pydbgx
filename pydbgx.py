@@ -51,11 +51,12 @@ IMAGE_FILE_MACHINE_AMD64 = 0x8664
 
 CurrentDir = os.path.dirname(os.path.abspath(__file__))
 DbgEngTlb = os.path.join(CurrentDir, 'helper', 'DbgEng.tlb')
-LibFolder = os.path.join(CurrentDir, 'lib')
+LibFolder = os.path.join(CurrentDir, 'lib', 'x86')
+LibFolder64 = os.path.join(CurrentDir, 'lib', 'x64')
 DbgHelpDLL = os.path.join(LibFolder, 'dbghelp.dll')
 DbgEngDLL = os.path.join(LibFolder, 'dbgeng.dll')
-DbgHelpDLL64 = os.path.join(LibFolder, 'dbghelp_x64.dll')
-DbgEngDLL64 = os.path.join(LibFolder, 'dbgeng_x64.dll')
+DbgHelpDLL64 = os.path.join(LibFolder64, 'dbghelp.dll')
+DbgEngDLL64 = os.path.join(LibFolder64, 'dbgeng.dll')
 
 
 try:
@@ -73,7 +74,7 @@ except ImportError:
 if platform.architecture()[0] == '32bit':
     if False == os.path.isfile(DbgHelpDLL) or False == os.path.isfile(DbgEngDLL):
         if False == os.path.isdir(LibFolder):
-            os.mkdir(LibFolder)
+            os.makedirs(LibFolder)
         print 'Missing dbghelp.dll and dbgeng.dll, please copy them to the "' + LibFolder + '" folder.'
         exit(0)
     try:
@@ -84,16 +85,17 @@ if platform.architecture()[0] == '32bit':
         exit(0)
 elif platform.architecture()[0] == '64bit':
     if False == os.path.isfile(DbgHelpDLL64) or False == os.path.isfile(DbgEngDLL64):
-        if False == os.path.isdir(LibFolder):
-            os.mkdir(LibFolder)
-        print 'Missing dbghelp_x64.dll and dbgeng_x64.dll, please copy them to the "' + LibFolder + '" folder and rename them appropriately.'
+        if False == os.path.isdir(LibFolder64):
+            os.makedirs(LibFolder64)
+        print 'Missing dbghelp.dll and dbgeng.dll, please copy them to the "' + LibFolder64 + '" folder.'
         exit(0)
     try:
+        print DbgEngDLL64
         dbghelp = windll.LoadLibrary(DbgHelpDLL64) 
         dbgeng = windll.LoadLibrary(DbgEngDLL64)
     except:
-         print 'Can not load 64bit dbghelp.dll and dbgeng.dll.'
-         exit(0)
+        print 'Can not load 64bit dbghelp.dll and dbgeng.dll.'
+        exit(0)
 else:
     raise Exception('Unsupported system.')
 
