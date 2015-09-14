@@ -17,6 +17,9 @@ from ctypes import create_string_buffer, byref
 from comtypes.hresult import S_OK, S_FALSE
 
 
+BpId = -1
+
+
 class MyDebugEventCallbacks(DebugEventCallbacks):
     """event callbacks"""
 
@@ -25,6 +28,12 @@ class MyDebugEventCallbacks(DebugEventCallbacks):
 
         super(DebugEventCallbacks, self).__init__()
         self.__mask = mask
+        self.__pydbgx = None
+
+    def bind_pydbgx(self, pydbgx):
+        """bind pydbgx"""
+
+        self.__pydbgx = pydbgx
 
     def GetInterestMask(self):
         """set interest mask"""
@@ -47,7 +56,7 @@ class MyDebugEventCallbacks(DebugEventCallbacks):
         Param = Bp.GetParameters()
         if Param.BreakType == DbgEng.DEBUG_BREAKPOINT_CODE:
             
-            print 'Breakpoint Hit Address:', hex(Param.Offset)
+            print 'Breakpoint:', hex(Param.Offset)
             
             buffer_size = Param.OffsetExpressionSize + 1
             buffer = create_string_buffer(buffer_size)
@@ -59,7 +68,7 @@ class MyDebugEventCallbacks(DebugEventCallbacks):
             
             if expression_size.value > 1:
                 expression = buffer.value
-                print 'Breakpoint Expression:', expression
+                print 'Expression:', expression
 
                 if -1 != expression.find('CreateFileW'):
                     debug_client = Bp.GetAdder()
@@ -70,6 +79,7 @@ class MyDebugEventCallbacks(DebugEventCallbacks):
                     addr = struct.unpack('<I', data)[0]
                     data = m.read_wide_string(addr)
                     print 'File Created:', data.decode('utf16')
+                    self.__pydbgx.remove_software_breakpoint_by_id(BpId)
 
 
 if __name__ == '__main__':
@@ -104,17 +114,20 @@ if __name__ == '__main__':
     # initialize the debugger
     dbgx = PyDbgX(event_cb=event_callback)
 
+    # bind PyDbgX instance to the event callbakcs
+    event_callback.bind_pydbgx(dbgx)
+
     # create target process: notepad.exe
-    # note: can not debug x64 executable if you use 32 bit python
+    # note: can not debug x64 executable with 32 bit python
     dbgx.create_process('notepad.exe')
 
     # active the process so that we can set breakpoints on it
     dbgx.active_process()
 
     # set a breakpoint on API CreateFileW
-    dbgx.set_software_breakpoint_exp('Kernel32!CreateFileW')
+    BpId = dbgx.set_software_breakpoint_exp('Kernel32!CreateFileW')
 
-    # set the effective processor to x86 if you use the 64 bit dbgeng.dll
+    # set the effective processor to x86 if the target is a x86 application
     dbgx.set_effective_processor('x86')
 
     # wait for debug event
