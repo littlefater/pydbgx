@@ -742,31 +742,63 @@ class DebugControl:
         return buffer.value
 
 
+class DebugSystem:
+    """IDebugSystemObjects Wrapper"""
+
+    def __init__(self, debug_client):
+        """DebugSystem initialization"""
+
+        self.__idebug_system = debug_client.query_interface(DbgEng.IDebugSystemObjects)
+        logger.debug('[D] DebugSystemObjects: ' + str(self.__idebug_system))
+
+    def get_number_process(self):
+        """IDebugSystemObjects::GetNumberProcesses method"""
+
+        return self.__idebug_system.GetNumberProcesses()
+
+    def get_current_pid(self):
+        """IDebugSystemObjects::GetCurrentProcessId method"""
+
+        return self.__idebug_system.GetCurrentProcessId()
+
+    def set_current_pid(self, pid):
+        """IDebugSystemObjects::SetCurrentProcessId method"""
+
+        hr = self.__idebug_system.SetCurrentProcessId(pid)
+        if S_OK != hr:
+            raise Exception('SetCurrentProcessId() fail.')
+
+    def get_pid_by_index(self, index):
+        """IDebugSystemObjects::GetProcessIdsByIndex method"""
+
+        count = 1
+        ids = (c_ulong * count)()
+        hr = self.__idebug_system._IDebugSystemObjects__com_GetProcessIdsByIndex(index, count, ids, None)
+        if S_OK != hr:
+            raise Exception('GetProcessIdsByIndex() fail.')
+
+        return ids[0]
+
+
 class PyDbgX:
     """debugger class"""
 
     def __init__(self, event_cb=None, output_cb=None):
         """initialize the debugger"""
         
-        logger.info('[*] Initiate DebugClient')
+        logger.info('[*] Initialize DebugClient')
         self.__debug_client = DebugClient()
-        logger.info('[I] Initiate DebugClient Success')
+        logger.info('[I] Initialize DebugClient Success')
         
         logger.debug('[D] Indentity: ' + self.__debug_client.get_indentity())
         
-        logger.info('[*] Initiate DebugControl')
+        logger.info('[*] Initialize DebugControl')
         self.__debug_control = DebugControl(self.__debug_client)
-        logger.info('[I] Initiate DebugControl Success')
-
+        logger.info('[I] Initialize DebugControl Success')
         
-        '''
-        logger.info('[*] Initiate DebugSystemObjects')
-        self.__debug_system = self.__debug_client.QueryInterface(DbgEng.IDebugSystemObjects)
-        if self.__debug_system is None:
-            raise Exception('Query interface IDebugSystemObjects fail.')
-        else:
-            logger.info('[I] Initiate DebugSystemObjects Success')
-        '''
+        logger.info('[*] Initialize DebugSystemObjects')
+        self.__debug_system = DebugSystem(self.__debug_client)
+        logger.info('[I] Initialize DebugSystemObjects Success')
         
         logger.info('[*] Set DebugEventCallbacks')
         if event_cb is None:
@@ -864,11 +896,11 @@ class PyDbgX:
 
     def active_process(self):
         """active process"""
-            
-        self.__debug_control.wait_for_event(0)
-        self.__debug_control.execute('|0s')
         
-
+        self.__debug_control.wait_for_event(0)
+        self.__debug_system.set_current_pid(0)
+        #self.__debug_control.execute('|0s')
+        
     def set_software_breakpoint_addr(self, address):
         """set software breakpoint"""
 
