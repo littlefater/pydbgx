@@ -90,7 +90,6 @@ elif platform.architecture()[0] == '64bit':
         print 'Missing dbghelp.dll and dbgeng.dll, please copy them to the "' + LibFolder64 + '" folder.'
         exit(0)
     try:
-        print DbgEngDLL64
         dbghelp = windll.LoadLibrary(DbgHelpDLL64) 
         dbgeng = windll.LoadLibrary(DbgEngDLL64)
     except:
@@ -576,6 +575,13 @@ class DebugControl:
 
         return self.__idebug_control.AddBreakpoint(type, desired_id)
 
+    def remove_breakpoint(self, breakpoint):
+        """IDebugControl::RemoveBreakpoint method"""
+
+        hr = self.__idebug_control.RemoveBreakpoint(breakpoint)
+        if S_OK != hr:
+            raise Exception('RemoveBreakpoint() fail.')
+
     def get_execution_status(self):
         """IDebugControl::GetExecutionStatus method"""
 
@@ -597,7 +603,7 @@ class DebugControl:
     def get_last_event(self):
         """IDebugControl::GetLastEventInformation method"""
 
-        logger.debug('[*] Get Last Event')
+        logger.debug('[*] Get LastEvent')
         event_type = c_ulong(0)
         process_id = c_ulong(0)
         thread_id = c_ulong(0)
@@ -860,6 +866,8 @@ class PyDbgX:
             raise Exception('AddFlags() fail.')
 
         self.__software_breakpoints.append(software_breakpoint)
+
+        return software_breakpoint.GetId()
     
     def set_software_breakpoint_exp(self, expression):
         """set software breakpoint expression"""
@@ -877,6 +885,16 @@ class PyDbgX:
             raise Exception('AddFlags() fail.')
 
         self.__software_breakpoints.append(software_breakpoint)
+
+        return software_breakpoint.GetId()
+
+    def remove_software_breakpoint_by_id(self, id):
+        """remove software breakpoint by id"""
+
+        for software_breakpoint in self.__software_breakpoints:
+            if id == software_breakpoint.GetId():
+                self.__debug_control.remove_breakpoint(software_breakpoint)
+                logger.debug('[D] Remove Breakpoint #: ' + str(id))
 
     def list_event_filtes(self):
         """list event filtes"""
@@ -923,9 +941,9 @@ class PyDbgX:
                 self.__debug_control.wait_for_event(INFINITE)
             except COMError, msg:
                 if -1 != str(msg).find('Catastrophic failure'):
-                    logger.debug('Process exit.')
+                    logger.debug('[D] Process exit.')
                 else:
-                    print 'Unknown error.'
+                    print msg
                 exit(0)
 
             self.__debug_control.get_last_event()
