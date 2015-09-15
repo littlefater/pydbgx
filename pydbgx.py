@@ -60,6 +60,19 @@ E_UNEXPECTED = 0x8000FFFF
 INFINITE = 0xFFFFFFFF
 IMAGE_FILE_MACHINE_I386 = 0x014c
 IMAGE_FILE_MACHINE_AMD64 = 0x8664
+PAGE_EXECUTE = 0x10
+PAGE_EXECUTE_READ = 0x20
+PAGE_EXECUTE_READWRITE = 0x40
+PAGE_EXECUTE_WRITECOPY = 0x80
+PAGE_NOACCESS = 0x01
+PAGE_READONLY = 0x02
+PAGE_READWRITE = 0x04
+PAGE_WRITECOPY = 0x08
+PAGE_TARGETS_INVALID = 0x40000000
+PAGE_TARGETS_NO_UPDATE = 0x40000000
+PAGE_GUARD = 0x100
+PAGE_NOCACHE = 0x200
+PAGE_WRITECOMBINE = 0x400
 
 
 ExecutionOption = {
@@ -372,6 +385,7 @@ class DataSpace:
 
         self.__debug_client = debug_client
         self.__data_space = debug_client.QueryInterface(DbgEng.IDebugDataSpaces)
+        self.__data_space2 = debug_client.QueryInterface(DbgEng.IDebugDataSpaces2)
         
     def read_memory(self, offset, length):
         """read virtual address"""
@@ -380,6 +394,7 @@ class DataSpace:
         bytes_read = c_ulong(0)
         
         hr = self.__data_space._IDebugDataSpaces__com_ReadVirtual(offset, buffer, length, byref(bytes_read))
+        
         if S_OK != hr:
             logger.warning('ReadVirtual() fail.')
             return None
@@ -425,13 +440,51 @@ class DataSpace:
             
         return out_str
         
-    def write_memory(self, offset, buffer):
+    def write_memory(self, offset, data):
         """write virtual address"""
-        pass
 
-    def search(self):
+        buffer = create_string_buffer(data)
+        buffer_size = len(data)
+        bytes_written = c_ulong(0)
+        hr = self.__data_space._IDebugDataSpaces__com_WriteVirtual(offset, buffer, buffer_size, byref(bytes_written))
+        if S_OK != hr:
+            raise Exception('WriteVirtual() fail.')
+        
+        return bytes_written.value
+
+    def search(self, offset, length, pattern):
         """search virtual address"""
-        pass
+
+        pattern_size = len(pattern)
+        granularity = 1
+        return self.__data_space.SearchVirtual(offset, length, pattern, pattern_size, granularity)
+
+    def query_virtual(self, offset):
+        """query the page information"""
+
+        return self.__data_space2.QueryVirtual(offset)
+
+    def can_write(self, offset):
+        """query if the page contains the specified address has write privilege"""
+
+        mem_info = self.query_virtual(offset)
+        protect = mem_info.AllocationProtect
+        
+        if (PAGE_EXECUTE_READWRITE & protect) or (PAGE_READWRITE & protect):
+            return True
+        
+        return False
+
+    def can_read(self, offset):
+        """query if the page contains the specified address has read privilege"""
+
+        mem_info = self.query_virtual(offset)
+        protect = mem_info.AllocationProtect
+        
+        if (PAGE_NOACCESS & protect) or (PAGE_GUARD & protect):
+            return False
+
+        return True
 
 
 class DebugClient:
