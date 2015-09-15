@@ -79,7 +79,11 @@ class MyDebugEventCallbacks(DebugEventCallbacks):
                     addr = struct.unpack('<I', data)[0]
                     data = m.read_wide_string(addr)
                     print 'File Created:', data.decode('utf16')
-                    self.__pydbgx.remove_software_breakpoint_by_id(BpId)
+                    if m.can_write(addr):
+                        m.write_memory(addr, 'this_is_a_test_file.txt\x00'.encode('utf16')[2:])
+                        data = m.read_wide_string(addr)
+                        print 'New FileName:', data.decode('utf16')
+                        self.__pydbgx.remove_software_breakpoint_by_id(BpId)
 
 
 if __name__ == '__main__':
