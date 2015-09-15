@@ -34,6 +34,18 @@ from comtypes.automation import IID, GUID
 from comtypes.client import GetModule
 
 
+try:
+    from comtypes.gen import DbgEng
+except ImportError:
+    if os.path.isfile(DbgEngTlb):
+        from comtypes.client import GetModule
+        GetModule(DbgEngTlb)
+        from comtypes.gen import DbgEng
+    else:
+        print 'Please use the tools in the helper folder to generate the DbgEng.tlb file.'
+        exit(0)
+
+
 logger = logging.getLogger('pydbgx')
 LogLevel = logging.WARNING
 logger.setLevel(LogLevel)
@@ -50,6 +62,17 @@ IMAGE_FILE_MACHINE_I386 = 0x014c
 IMAGE_FILE_MACHINE_AMD64 = 0x8664
 
 
+ExecutionOption = {
+    DbgEng.DEBUG_FILTER_BREAK: 'DEBUG_FILTER_BREAK',
+    DbgEng.DEBUG_FILTER_SECOND_CHANCE_BREAK: 'DEBUG_FILTER_SECOND_CHANCE_BREAK',
+    DbgEng.DEBUG_FILTER_OUTPUT: 'DEBUG_FILTER_OUTPUT',
+    DbgEng.DEBUG_FILTER_IGNORE: 'DEBUG_FILTER_OUTPUT'}
+
+ContinueOption = {
+    DbgEng.DEBUG_FILTER_GO_HANDLED: 'DEBUG_FILTER_GO_HANDLED',
+    DbgEng.DEBUG_FILTER_GO_NOT_HANDLED: 'DEBUG_FILTER_GO_NOT_HANDLED'}
+
+
 CurrentDir = os.path.dirname(os.path.abspath(__file__))
 DbgEngTlb = os.path.join(CurrentDir, 'helper', 'DbgEng.tlb')
 LibFolder = os.path.join(CurrentDir, 'lib', 'x86')
@@ -58,18 +81,6 @@ DbgHelpDLL = os.path.join(LibFolder, 'dbghelp.dll')
 DbgEngDLL = os.path.join(LibFolder, 'dbgeng.dll')
 DbgHelpDLL64 = os.path.join(LibFolder64, 'dbghelp.dll')
 DbgEngDLL64 = os.path.join(LibFolder64, 'dbgeng.dll')
-
-
-try:
-    from comtypes.gen import DbgEng
-except ImportError:
-    if os.path.isfile(DbgEngTlb):
-        from comtypes.client import GetModule
-        GetModule(DbgEngTlb)
-        from comtypes.gen import DbgEng
-    else:
-        print 'Please use the tools in the helper folder to generate the DbgEng.tlb file.'
-        exit(0)
 
 
 if platform.architecture()[0] == '32bit':
@@ -741,6 +752,64 @@ class DebugControl:
 
         return buffer.value
 
+    def get_specific_filter_parameters(self, index):
+        """IDebugControl::GetSpecificFilterParameters method"""
+
+        try:
+            count = 1
+            return self.__idebug_control.GetSpecificFilterParameters(index, count)
+        except COMError, msg:
+            return None
+
+    def set_specific_filter_parameters(self, index, parameter):
+        """IDebugControl::SetSpecificFilterParameters method"""
+
+        count = 1
+        hr = self.__idebug_control.SetSpecificFilterParameters(index, count, parameter)
+        if S_OK != hr:
+            raise Exception('SetSpecificFilterParameters() fail.')
+
+    def get_exception_filter_parameters(self, index):
+        """IDebugControl::GetExceptionFilterParameters method"""
+
+        try:
+            count = 1
+            codes = None
+            return self.__idebug_control.GetExceptionFilterParameters(count, codes, index)
+        except COMError, msg:
+            return None
+
+    def set_exception_filter_parameters(self, parameter):
+        """IDebugControl::SetExceptionFilterParameters method"""
+    
+        count = 1
+        hr = self.__idebug_control.SetExceptionFilterParameters(count, parameter)
+        if S_OK != hr:
+            raise Exception('SetExceptionFilterParameters() fail.')
+
+    def get_exception_filter_second_command(self, index):
+        """IDebugControl::GetExceptionFilterSecondCommand method"""
+
+        buffer_size = 0x100
+        buffer = create_string_buffer(buffer_size)
+        command_size = c_ulong(0)
+        
+        hr = self.__idebug_control._IDebugControl__com_GetExceptionFilterSecondCommand(
+            index, buffer, buffer_size, byref(command_size))
+        
+        if S_OK != hr:
+            if S_FALSE == hr:
+                buffer_size = command_size.value + 1
+                buffer = create_string_buffer(buffer_size)
+                hr = self.__idebug_control._IDebugControl__com_GetExceptionFilterSecondCommand(
+                    index, buffer, buffer_size, byref(command_size))
+                if S_OK != hr:
+                    raise Exception('GetExceptionFilterSecondCommand() fail.')
+            else:
+                raise Exception('GetExceptionFilterSecondCommand() fail.')
+
+        return buffer.value
+
 
 class DebugSystem:
     """IDebugSystemObjects Wrapper"""
@@ -896,10 +965,17 @@ class PyDbgX:
 
     def active_process(self):
         """active process"""
+
+        logger.debug('[*] Active Process')
         
-        self.__debug_control.wait_for_event(0)
+        self.change_event_filter(
+            'Initial breakpoint',
+            DbgEng.DEBUG_FILTER_BREAK,
+            DbgEng.DEBUG_FILTER_GO_HANDLED)
+        
+        self.__debug_control.wait_for_event(INFINITE)
+        
         self.__debug_system.set_current_pid(0)
-        #self.__debug_control.execute('|0s')
         
     def set_software_breakpoint_addr(self, address):
         """set software breakpoint"""
@@ -963,21 +1039,73 @@ class PyDbgX:
 
         for index in range(0, total):
 
-            print 'Filter #' + str(index) + ':'
-
             text = self.__debug_control.get_event_filter_text(index)
             if len(text) > 1:
-                print text
+                print 'Filter #' + str(index) + ': ' + text
+
+            parameter = self.__debug_control.get_specific_filter_parameters(index)
             
-            command = self.__debug_control.get_event_filter_command(index)
-            if len(command) > 1:
-                print command
+            if parameter is not None:
+                
+                print 'ExecutionOption:', ExecutionOption[parameter.ExecutionOption]
+                print 'ContinueOption:', ContinueOption[parameter.ContinueOption]
+                
+                if parameter.ArgumentSize > 1:
+                    argument = self.__debug_control.get_specific_filter_argument(index)
+                    print 'Argument:', argument
+                    
+                if parameter.CommandSize > 1:
+                    command = self.__debug_control.get_event_filter_command(index)
+                    print 'Command:', command
+            else:
+                parameter = self.__debug_control.get_exception_filter_parameters(index)
+                if parameter is not None:
+                    
+                    print 'ExecutionOption:', ExecutionOption[parameter.ExecutionOption]
+                    print 'ContinueOption:', ContinueOption[parameter.ContinueOption]
+                    print 'ExceptionCode:', hex(parameter.ExceptionCode)
+                        
+                    if parameter.CommandSize > 1:
+                        command = self.__debug_control.get_event_filter_command(index)
+                        print 'Command:', command
 
-            argument = self.__debug_control.get_specific_filter_argument(index)
-            if argument is not None and len(argument) > 1:
-                print argument
-
+                    if parameter.SecondCommandSize > 1:
+                        command2 = self.__debug_control.get_exception_filter_second_command(index)
+                        print 'SecondCommand:', command2
+                        
             print '-' * 30
+
+    def change_event_filter(self, name, execution_option, continue_option):
+        """change event filter"""
+
+        specific_events, specific_exceptions, arbitrary_exceptions = self.__debug_control.get_number_event_filters()
+        total = specific_events + specific_exceptions
+        
+        if total == 0:
+            raise Exception('No filters.')
+
+        for index in range(0, total):
+
+            text = self.__debug_control.get_event_filter_text(index)
+            if text == name:
+                
+                parameter = self.__debug_control.get_specific_filter_parameters(index)  
+                if parameter is not None:
+                    parameter.ExecutionOption = execution_option
+                    parameter.ContinueOption = continue_option
+                    self.__debug_control.set_specific_filter_parameters(index, parameter)  
+                    return True
+                
+                parameter = self.__debug_control.get_exception_filter_parameters(index)
+                if parameter is not None: 
+                    parameter.ExecutionOption = execution_option
+                    parameter.ContinueOption = continue_option
+                    self.__debug_control.set_exception_filter_parameters(parameter)
+                    return True
+
+                break
+        
+        return False
 
     def wait_for_event_ex(self):
         """debug loop"""
@@ -985,7 +1113,6 @@ class PyDbgX:
         logger.info('[*] WaitForEvent')
         logger.debug('[D] ExecStatus: ' + str(hex(self.__debug_control.get_execution_status())))
         logger.debug('[D] EffectiveProcessorType: ' + str(hex(self.__debug_control.get_effective_processor_type())))
-        #self.list_event_filtes()
         
         while True:
             try:
