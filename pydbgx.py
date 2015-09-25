@@ -34,6 +34,10 @@ from comtypes.automation import IID, GUID
 from comtypes.client import GetModule
 
 
+CurrentDir = os.path.dirname(os.path.abspath(__file__))
+DbgEngTlb = os.path.join(CurrentDir, 'helper', 'DbgEng.tlb')
+
+
 try:
     from comtypes.gen import DbgEng
 except ImportError:
@@ -86,8 +90,6 @@ ContinueOption = {
     DbgEng.DEBUG_FILTER_GO_NOT_HANDLED: 'DEBUG_FILTER_GO_NOT_HANDLED'}
 
 
-CurrentDir = os.path.dirname(os.path.abspath(__file__))
-DbgEngTlb = os.path.join(CurrentDir, 'helper', 'DbgEng.tlb')
 LibFolder = os.path.join(CurrentDir, 'lib', 'x86')
 LibFolder64 = os.path.join(CurrentDir, 'lib', 'x64')
 DbgHelpDLL = os.path.join(LibFolder, 'dbghelp.dll')
@@ -1179,6 +1181,12 @@ class PyDbgX:
 
             self.__debug_control.get_last_event()
             logger.debug('[D] ExitCode: ' + str(self.__debug_client.get_exit_code()))
+
+    def execute(self, cmd):
+        """execute debug command"""
+
+        logger.debug('[*] Execute: ' + cmd)
+        self.__debug_control.execute(cmd)
         
 
 if __name__ == '__main__':
