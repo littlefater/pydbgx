@@ -615,6 +615,13 @@ class DebugClient:
         if S_OK != hr:
             raise Exception('CreateProcess() fail.')
 
+    def terminate_process(self):
+        """IDebugClient::TerminateProcesses method"""
+
+        hr = self.__idebug_client.TerminateProcesses()
+        if S_OK != hr:
+            raise Exception('TerminateProcesses() fail.')
+
     def get_exit_code(self):
         """IDebugClient::GetExitCode method"""
 
@@ -1187,7 +1194,11 @@ class PyDbgX:
 
         logger.debug('[*] Execute: ' + cmd)
         self.__debug_control.execute(cmd)
-        
+
+    def terminate_process(self):
+        """terminate process"""
+
+        self.__debug_client.terminate_process()
 
 if __name__ == '__main__':
 
